@@ -22,6 +22,10 @@ cp .env.example .env
 
 Only PRs by authors listed in `REVIEW_ALLOWED_AUTHORS` will be reviewed; all others are ignored.
 
+### Corporate CA certificates
+
+If you're behind a corporate proxy with custom CA certificates, copy the `.crt` or `.pem` files into the `certs/` directory before building. They will be added to the container's trust store during the build. The directory ships empty so non-corporate builds are unaffected.
+
 ## Run
 
 ```bash

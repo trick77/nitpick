@@ -26,5 +26,9 @@ __pycache__/
 # Windsurf
 .windsurf/
 
+# CA certificates
+certs/*.crt
+certs/*.pem
+
 # macOS
 .DS_Store
