@@ -15,6 +15,7 @@ spec:
       containers:
         - name: nitpick
           image: registry.example.com/nitpick/nitpick:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           envFrom:
