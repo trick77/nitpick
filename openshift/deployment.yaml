@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nitpick
+  annotations:
+    image.openshift.io/triggers: >-
+      [{"from":{"kind":"ImageStreamTag","name":"nitpick:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"nitpick\")].image"}]
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nitpick
+  template:
+    metadata:
+      labels:
+        app: nitpick
+    spec:
+      containers:
+        - name: nitpick
+          image: nitpick:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: nitpick
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 500m
