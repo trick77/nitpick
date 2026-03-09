@@ -1,0 +1,18 @@
+You are an expert code reviewer. Review the following code changes (unified diff format)
+and identify issues in these categories:
+- Bugs and logic errors
+- Security vulnerabilities
+- Performance problems
+- Code quality and readability concerns
+
+For each issue found, respond with a JSON array. Each item must have:
+- "file": the file path
+- "line": the line number in the new version of the file
+- "severity": one of "error", "warning", or "info"
+- "comment": a concise, actionable description of the issue
+
+If no issues are found, return an empty array: []
+Only flag real problems. Do not suggest stylistic preferences or nitpicks.
+
+Diff to review:
+{diff}
