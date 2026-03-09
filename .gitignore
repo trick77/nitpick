@@ -1,0 +1,30 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDEs
+.vscode/
+.idea/
+*.iml
+*.swp
+*~
+
+# Claude Code
+.claude/
+
+# Cursor
+.cursor/
+
+# Aider
+.aider*
+
+# Windsurf
+.windsurf/
+
+# macOS
+.DS_Store
