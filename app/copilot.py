@@ -1,5 +1,6 @@
 import json
 import logging
+import ssl
 from pathlib import Path
 
 import httpx
@@ -119,6 +120,7 @@ class CopilotClient:
                 "Accept": "application/json",
             },
             timeout=120.0,
+            verify=ssl.create_default_context(),
         )
         self.prompt_template = _load_prompt_template(
             review_config.review_prompt_template

@@ -1,4 +1,5 @@
 import logging
+import ssl
 
 import httpx
 
@@ -18,6 +19,7 @@ class BitbucketClient:
                 "Accept": "application/json",
             },
             timeout=30.0,
+            verify=ssl.create_default_context(),
         )
 
     async def close(self):
