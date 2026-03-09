@@ -1,0 +1,11 @@
+services:
+  nitpick:
+    build:
+      context: .
+      dockerfile: Containerfile
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./prompts:/app/prompts:ro
+    restart: unless-stopped

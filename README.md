@@ -35,22 +35,8 @@ podman run -p 8080:8080 --env-file .env \
 
 Or with Compose:
 
-```yaml
-services:
-  nitpick:
-    build:
-      context: .
-      dockerfile: Containerfile
-    ports:
-      - "8080:8080"
-    env_file: .env
-    volumes:
-      - ./prompts:/app/prompts:ro
-    restart: unless-stopped
-```
-
 ```bash
-docker compose up -d
+podman compose up -d
 ```
 
 ## Configure Bitbucket webhook
