@@ -67,14 +67,12 @@ class Reviewer:
             findings = _deduplicate(findings, existing)
             findings, truncated = _sort_and_limit(findings, self.max_comments)
 
-            to_commit = pr.fromRef.latestCommit or ""
-
             posted = 0
             failed = 0
             for finding in findings:
                 try:
                     await self.bitbucket.post_inline_comment(
-                        project_key, repo_slug, pr_id, finding, to_commit
+                        project_key, repo_slug, pr_id, finding
                     )
                     posted += 1
                 except Exception:

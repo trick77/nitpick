@@ -84,7 +84,7 @@ class TestBitbucketClient:
         finding = ReviewFinding(
             file="src/main.py", line=10, severity="error", comment="Bug here"
         )
-        await client.post_inline_comment("PROJ", "my-repo", 1, finding, "abc123")
+        await client.post_inline_comment("PROJ", "my-repo", 1, finding)
         await client.close()
 
     @pytest.mark.asyncio
@@ -110,16 +110,14 @@ class TestBitbucketClient:
         finding = ReviewFinding(
             file="src/main.py", line=5, severity="suggestion", comment="Consider refactoring"
         )
-        await client.post_inline_comment("PROJ", "my-repo", 1, finding, "abc123")
+        await client.post_inline_comment("PROJ", "my-repo", 1, finding)
 
         assert route.call_count == 2
         import json
         first_body = json.loads(route.calls[0].request.content)
         second_body = json.loads(route.calls[1].request.content)
         assert first_body["anchor"]["lineType"] == "ADDED"
-        assert first_body["anchor"]["diffType"] == "EFFECTIVE"
         assert second_body["anchor"]["lineType"] == "CONTEXT"
-        assert second_body["anchor"]["diffType"] == "EFFECTIVE"
         await client.close()
 
     @pytest.mark.asyncio
@@ -132,7 +130,7 @@ class TestBitbucketClient:
         finding = ReviewFinding(
             file="src/main.py", line=10, severity="error", comment="Bug here"
         )
-        await client.post_inline_comment("PROJ", "my-repo", 1, finding, "abc123")
+        await client.post_inline_comment("PROJ", "my-repo", 1, finding)
 
         body = route.calls[0].request.content.decode()
         assert NITPICK_MARKER in body

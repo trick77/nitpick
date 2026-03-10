@@ -57,7 +57,6 @@ class BitbucketClient:
         repo: str,
         pr_id: int,
         finding: ReviewFinding,
-        to_commit: str,
     ) -> None:
         url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments"
         path = re.sub(r"^[ab]/", "", finding.file)
@@ -67,8 +66,6 @@ class BitbucketClient:
                 "path": path,
                 "line": finding.line,
                 "fileType": "TO",
-                "diffType": "EFFECTIVE",
-                "toHash": to_commit,
             },
         }
         # Try ADDED first (new lines), fall back to CONTEXT (unchanged lines)
