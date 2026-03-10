@@ -16,6 +16,14 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+class _HealthFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_HealthFilter())
 logger = logging.getLogger(__name__)
 
 config = None
@@ -79,6 +87,10 @@ async def webhook(
     body = await request.body()
 
     if not x_hub_signature:
+        # Bitbucket "Test connection" may omit both signature and event key
+        if not x_event_key and b"eventKey" not in body:
+            logger.info("Test connection received (no signature, no event key)")
+            return {"status": "ok"}
         raise HTTPException(status_code=401, detail="Missing signature")
     if not _verify_webhook_signature(
         body, x_hub_signature, config.bitbucket.webhook_secret

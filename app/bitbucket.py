@@ -9,7 +9,7 @@ from app.models import ReviewFinding
 
 logger = logging.getLogger(__name__)
 
-NITPICK_MARKER = "— _nörgler_"
+NOERGLER_MARKER = "— _nörgler_"
 
 
 class BitbucketClient:
@@ -42,11 +42,10 @@ class BitbucketClient:
     async def fetch_file_content(
         self, project: str, repo: str, commit: str, path: str
     ) -> str:
-        url = f"/rest/api/1.0/projects/{project}/repos/{repo}/browse/{path}"
+        url = f"/rest/api/1.0/projects/{project}/repos/{repo}/raw/{path}"
         response = await self.client.get(
             url,
             params={"at": commit},
-            headers={"Accept": "text/plain"},
         )
         response.raise_for_status()
         return response.text
@@ -61,7 +60,7 @@ class BitbucketClient:
         url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments"
         path = re.sub(r"^[ab]/", "", finding.file)
         payload = {
-            "text": f"**[{finding.severity.upper()}]** {finding.comment}\n\n{NITPICK_MARKER}",
+            "text": f"**[{finding.severity.upper()}]** {finding.comment}\n\n{NOERGLER_MARKER}",
             "anchor": {
                 "path": path,
                 "line": finding.line,
@@ -86,7 +85,7 @@ class BitbucketClient:
         self, project: str, repo: str, pr_id: int, text: str
     ) -> None:
         url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments"
-        response = await self.client.post(url, json={"text": f"{text}\n\n{NITPICK_MARKER}"})
+        response = await self.client.post(url, json={"text": f"{text}\n\n{NOERGLER_MARKER}"})
         response.raise_for_status()
         logger.debug("Posted summary comment on PR %d", pr_id)
 

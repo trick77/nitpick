@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from app.bitbucket import NITPICK_MARKER, BitbucketClient
+from app.bitbucket import NOERGLER_MARKER, BitbucketClient
 from app.config import BitbucketConfig
 from app.models import ReviewFinding
 
@@ -67,7 +67,7 @@ class TestBitbucketClient:
     async def test_fetch_file_content(self, client):
         content = "print('hello')\n"
         respx.get(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/browse/src/main.py"
+            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/raw/src/main.py"
         ).mock(return_value=httpx.Response(200, text=content))
 
         result = await client.fetch_file_content("PROJ", "my-repo", "abc123", "src/main.py")
@@ -133,7 +133,7 @@ class TestBitbucketClient:
         await client.post_inline_comment("PROJ", "my-repo", 1, finding)
 
         body = route.calls[0].request.content.decode()
-        assert NITPICK_MARKER in body
+        assert NOERGLER_MARKER in body
         await client.close()
 
     @pytest.mark.asyncio
@@ -144,7 +144,7 @@ class TestBitbucketClient:
                 {
                     "action": "COMMENTED",
                     "comment": {
-                        "text": f"**[ERROR]** bug\n\n{NITPICK_MARKER}",
+                        "text": f"**[ERROR]** bug\n\n{NOERGLER_MARKER}",
                         "anchor": {"path": "a.py", "line": 10},
                     },
                 },
@@ -168,7 +168,7 @@ class TestBitbucketClient:
         assert len(comments) == 2
         assert comments[0]["path"] == "a.py"
         assert comments[0]["line"] == 10
-        assert NITPICK_MARKER in comments[0]["text"]
+        assert NOERGLER_MARKER in comments[0]["text"]
         assert comments[1]["text"] == "Human comment"
         await client.close()
 

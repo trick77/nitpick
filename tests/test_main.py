@@ -108,6 +108,15 @@ class TestWebhookSignature:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
+    def test_test_connection_returns_200_without_signature_or_event_key(self, client):
+        resp = client.post(
+            "/webhook",
+            content=b"{}",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
     def test_non_pr_event_ignored(self, client):
         body = json.dumps(NON_PR_PAYLOAD).encode()
         resp = client.post(

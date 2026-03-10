@@ -3,7 +3,7 @@ import logging
 import re
 import time
 
-from app.bitbucket import NITPICK_MARKER, BitbucketClient
+from app.bitbucket import NOERGLER_MARKER, BitbucketClient
 from app.copilot import (
     CopilotClient,
     FileReviewData,
@@ -66,7 +66,13 @@ class Reviewer:
                 return
 
             # Phase 1: split by file, filter by extension/binary
-            file_diffs = [fd for fd in split_by_file(diff) if is_reviewable_diff(fd)]
+            all_file_diffs = split_by_file(diff)
+            file_diffs = [fd for fd in all_file_diffs if is_reviewable_diff(fd)]
+            skipped = len(all_file_diffs) - len(file_diffs)
+            logger.info(
+                "PR %d: %d file(s) in diff, %d reviewable, %d skipped (binary/non-reviewable)",
+                pr_id, len(all_file_diffs), len(file_diffs), skipped,
+            )
             if not file_diffs:
                 logger.info("PR %d has no reviewable files, skipping", pr_id)
                 return
@@ -88,9 +94,14 @@ class Reviewer:
                     except Exception:
                         logger.warning("Failed to fetch content for %s, using diff only", path)
                 # Phase 2: skip if content exceeds max_lines_per_file
-                if content and content.count("\n") + 1 > self.max_lines_per_file:
-                    logger.info("Skipping %s: content exceeds %d lines", path, self.max_lines_per_file)
+                line_count = content.count("\n") + 1 if content else 0
+                if content and line_count > self.max_lines_per_file:
+                    logger.info(
+                        "Skipping %s: %d lines exceeds limit of %d",
+                        path, line_count, self.max_lines_per_file,
+                    )
                     return None
+                logger.info("Including %s for review (%d lines, deleted=%s)", path, line_count, deleted)
                 return FileReviewData(path=path, diff=file_diff, content=content)
 
             results = await asyncio.gather(*[_build_file_data(fd) for fd in file_diffs])
@@ -219,7 +230,7 @@ def _deduplicate(
 ) -> list[ReviewFinding]:
     existing_keys: set[tuple[str | None, int | None, str]] = set()
     for comment in existing:
-        if NITPICK_MARKER not in comment.get("text", ""):
+        if NOERGLER_MARKER not in comment.get("text", ""):
             continue
         match = _SEVERITY_RE.search(comment.get("text", ""))
         if match:

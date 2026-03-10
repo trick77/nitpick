@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.bitbucket import NITPICK_MARKER
+from app.bitbucket import NOERGLER_MARKER
 from app.copilot import FileReviewData
 from app.models import ReviewFinding, WebhookPayload
 from app.reviewer import Reviewer, _deduplicate, _sort_and_limit
@@ -348,7 +348,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="b.py", line=20, severity="warning", comment="style"),
         ]
         existing = [
-            {"text": f"**[ERROR]** bug\n\n{NITPICK_MARKER}", "path": "a.py", "line": 10},
+            {"text": f"**[ERROR]** bug\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
         ]
         result = _deduplicate(findings, existing)
         assert len(result) == 1
@@ -369,7 +369,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="a.py", line=10, severity="warning", comment="style"),
         ]
         existing = [
-            {"text": f"**[ERROR]** bug\n\n{NITPICK_MARKER}", "path": "a.py", "line": 10},
+            {"text": f"**[ERROR]** bug\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
         ]
         result = _deduplicate(findings, existing)
         assert len(result) == 1
