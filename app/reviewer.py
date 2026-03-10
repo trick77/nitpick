@@ -55,7 +55,10 @@ class Reviewer:
                 )
                 return
 
-            logger.info("Starting review of PR %d by %s", pr_id, author_name)
+            logger.info(
+                "Starting review of PR %d by %s in %s/%s (branch: %s)",
+                pr_id, author_name, project_key, repo_slug, pr.fromRef.displayId,
+            )
             t0 = time.monotonic()
 
             diff = await self.bitbucket.fetch_pr_diff(
@@ -83,6 +86,8 @@ class Reviewer:
             async def _build_file_data(file_diff: str) -> FileReviewData | None:
                 path = extract_path(file_diff)
                 if not path:
+                    first_line = file_diff.split("\n", 1)[0][:200]
+                    logger.warning("Could not extract path from diff chunk: %r", first_line)
                     return None
                 deleted = is_deleted(file_diff)
                 content = None

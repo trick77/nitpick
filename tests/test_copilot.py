@@ -143,6 +143,22 @@ class TestExtractPath:
     def test_returns_none_for_invalid(self):
         assert extract_path("not a diff\n") is None
 
+    def test_handles_crlf_line_endings(self):
+        diff = "diff --git a/old/path.py b/new/path.py\r\n+code\r\n"
+        assert extract_path(diff) == "new/path.py"
+
+    def test_diff_header_not_on_first_line(self):
+        diff = "some preamble\ndiff --git a/old/path.py b/new/path.py\n+code\n"
+        assert extract_path(diff) == "new/path.py"
+
+    def test_fallback_via_plus_plus_plus_header(self):
+        diff = "--- a/src/main.py\n+++ b/src/main.py\n@@ -1,3 +1,3 @@\n-old\n+new\n"
+        assert extract_path(diff) == "src/main.py"
+
+    def test_fallback_with_crlf(self):
+        diff = "--- a/src/main.py\r\n+++ b/src/main.py\r\n@@ -1,3 +1,3 @@\r\n"
+        assert extract_path(diff) == "src/main.py"
+
 
 class TestIsDeleted:
     def test_deleted_file(self):

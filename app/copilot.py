@@ -54,10 +54,10 @@ _DIFF_PATH_RE = re.compile(r"^diff --git a/.+ b/(.+)$", re.MULTILINE)
 
 def is_reviewable_diff(file_diff: str) -> bool:
     """Phase 1: check extension and binary markers on the diff (before fetching content)."""
-    match = _DIFF_PATH_RE.match(file_diff)
+    match = _DIFF_PATH_RE.search(file_diff)
     if not match:
         return True
-    path = match.group(1).lower()
+    path = match.group(1).rstrip("\r").lower()
     if "binary files" in file_diff[:500].lower() and "differ" in file_diff[:500].lower():
         return False
     if any(path.endswith(ext) for ext in SKIP_EXTENSIONS):
@@ -67,8 +67,12 @@ def is_reviewable_diff(file_diff: str) -> bool:
 
 def extract_path(file_diff: str) -> str | None:
     """Extract the file path (b/ side) from a per-file diff header."""
-    match = _DIFF_PATH_RE.match(file_diff)
-    return match.group(1) if match else None
+    match = _DIFF_PATH_RE.search(file_diff)
+    if match:
+        return match.group(1).rstrip("\r")
+    # Fallback: extract from +++ header
+    fallback = re.search(r"^\+\+\+ b/(.+)$", file_diff, re.MULTILINE)
+    return fallback.group(1).rstrip("\r") if fallback else None
 
 
 def is_deleted(file_diff: str) -> bool:
