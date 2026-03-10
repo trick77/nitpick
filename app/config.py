@@ -1,6 +1,5 @@
 import os
 
-from dotenv import load_dotenv
 from pydantic import BaseModel, field_validator
 
 
@@ -52,7 +51,6 @@ def _env(name: str, default: str | None = None) -> str:
 
 
 def load_config() -> AppConfig:
-    load_dotenv()
     return AppConfig(
         bitbucket=BitbucketConfig(
             base_url=_env("BITBUCKET_URL"),

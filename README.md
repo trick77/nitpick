@@ -41,7 +41,7 @@ Brings automated AI code review to on-premise Bitbucket Server installations. Re
 
 ## Configuration
 
-All configuration is driven by environment variables (loaded from `.env` via python-dotenv).
+All configuration is driven by environment variables.
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
