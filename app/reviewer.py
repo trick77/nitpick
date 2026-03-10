@@ -227,19 +227,21 @@ class Reviewer:
 
         rows = []
         if counts["error"]:
-            rows.append(f"| 🔴 Error   | {counts['error']:>5} |")
+            rows.append(f"│ 🔴 Error   │ {counts['error']:>5} │")
         if counts["warning"]:
-            rows.append(f"| 🟠 Warning | {counts['warning']:>5} |")
+            rows.append(f"│ 🟠 Warning │ {counts['warning']:>5} │")
         if counts["info"]:
-            rows.append(f"| 🔵 Info    | {counts['info']:>5} |")
+            rows.append(f"│ 🔵 Info    │ {counts['info']:>5} │")
 
         table = "\n".join([
-            "| Severity | Count |",
-            "|----------|-------|",
+            "┌──────────┬───────┐",
+            "│ Severity │ Count │",
+            "├──────────┼───────┤",
             *rows,
+            "└──────────┴───────┘",
         ])
 
-        summary = f"**Noergler review summary:** {self._plural(len(findings), 'issue')} found\n\n{table}"
+        summary = f"**Noergler review summary:** {self._plural(len(findings), 'issue')} found\n\n```\n{table}\n```"
         if truncated:
             summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
         return summary
