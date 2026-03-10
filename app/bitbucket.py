@@ -67,6 +67,7 @@ class BitbucketClient:
                 "path": path,
                 "line": finding.line,
                 "fileType": "TO",
+                "diffType": "EFFECTIVE",
                 "toHash": to_commit,
             },
         }

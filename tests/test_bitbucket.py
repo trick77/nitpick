@@ -117,7 +117,9 @@ class TestBitbucketClient:
         first_body = json.loads(route.calls[0].request.content)
         second_body = json.loads(route.calls[1].request.content)
         assert first_body["anchor"]["lineType"] == "ADDED"
+        assert first_body["anchor"]["diffType"] == "EFFECTIVE"
         assert second_body["anchor"]["lineType"] == "CONTEXT"
+        assert second_body["anchor"]["diffType"] == "EFFECTIVE"
         await client.close()
 
     @pytest.mark.asyncio
