@@ -63,8 +63,10 @@ SKIP_EXTENSIONS = frozenset({
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".jar", ".war",
     ".exe", ".dll", ".so", ".dylib", ".bin", ".class", ".pyc", ".o", ".a",
+    ".wasm",
+    ".db", ".sqlite", ".sqlite3",
     # Data / config that rarely benefits from code review
-    ".json", ".lock", ".min.js", ".min.css",
+    ".json", ".lock", ".min.js", ".min.css", ".csv",
     ".map",
     # Build / config files
     ".xml", ".bat", ".cmd", ".properties",
