@@ -49,7 +49,9 @@ SKIP_EXTENSIONS = frozenset({
     ".map",
 })
 
-_DIFF_PATH_RE = re.compile(r"^diff --git a/.+ b/(.+)$", re.MULTILINE)
+_DIFF_PATH_RE = re.compile(
+    r"^diff --git (?:a/.+ b/|src://.+ dst://)(.+)$", re.MULTILINE
+)
 
 
 def is_reviewable_diff(file_diff: str) -> bool:
@@ -70,8 +72,8 @@ def extract_path(file_diff: str) -> str | None:
     match = _DIFF_PATH_RE.search(file_diff)
     if match:
         return match.group(1).rstrip("\r")
-    # Fallback: extract from +++ header
-    fallback = re.search(r"^\+\+\+ b/(.+)$", file_diff, re.MULTILINE)
+    # Fallback: extract from +++ header (standard b/ or Bitbucket src:// format)
+    fallback = re.search(r"^\+\+\+ (?:b/|dst://)(.+)$", file_diff, re.MULTILINE)
     return fallback.group(1).rstrip("\r") if fallback else None
 
 

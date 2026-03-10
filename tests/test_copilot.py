@@ -103,6 +103,14 @@ class TestIsReviewableDiff:
             diff = f"diff --git a/{name} b/{name}\n+content\n"
             assert is_reviewable_diff(diff), f"{name} should be reviewable"
 
+    def test_bitbucket_src_dst_format_reviewable(self):
+        diff = "diff --git src://src/main/java/Foo.java dst://src/main/java/Foo.java\n+code\n"
+        assert is_reviewable_diff(diff)
+
+    def test_bitbucket_src_dst_format_skipped(self):
+        diff = "diff --git src://assets/image.png dst://assets/image.png\n+binary\n"
+        assert not is_reviewable_diff(diff)
+
 
 class TestFileReviewData:
     def test_dataclass_fields(self):
@@ -158,6 +166,18 @@ class TestExtractPath:
     def test_fallback_with_crlf(self):
         diff = "--- a/src/main.py\r\n+++ b/src/main.py\r\n@@ -1,3 +1,3 @@\r\n"
         assert extract_path(diff) == "src/main.py"
+
+    def test_bitbucket_src_dst_format(self):
+        diff = "diff --git src://build.gradle dst://build.gradle\n+code\n"
+        assert extract_path(diff) == "build.gradle"
+
+    def test_bitbucket_src_dst_nested_path(self):
+        diff = "diff --git src://src/main/java/com/example/Foo.java dst://src/main/java/com/example/Foo.java\n"
+        assert extract_path(diff) == "src/main/java/com/example/Foo.java"
+
+    def test_bitbucket_dst_fallback(self):
+        diff = "--- src://main.py\n+++ dst://main.py\n@@ -1,3 +1,3 @@\n"
+        assert extract_path(diff) == "main.py"
 
 
 class TestIsDeleted:

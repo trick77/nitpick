@@ -39,6 +39,7 @@ class Reviewer:
         return not self.allowed_authors or author_name in self.allowed_authors
 
     async def review_pull_request(self, payload: WebhookPayload) -> None:
+        pr_tag = "unknown"
         try:
             pr = payload.pullRequest
             author_name = pr.author.user.name
@@ -49,15 +50,17 @@ class Reviewer:
                 logger.error("Could not extract project/repo from webhook payload")
                 return
 
+            pr_tag = f"{project_key}/{repo_slug}#{pr_id}"
+
             if not self.is_author_allowed(author_name):
                 logger.info(
-                    "Skipping PR %d by %s (not in allowed authors)", pr_id, author_name
+                    "Skipping %s by %s (not in allowed authors)", pr_tag, author_name
                 )
                 return
 
             logger.info(
-                "Starting review of PR %d by %s in %s/%s (branch: %s)",
-                pr_id, author_name, project_key, repo_slug, pr.fromRef.displayId,
+                "Starting review of %s by %s (branch: %s)",
+                pr_tag, author_name, pr.fromRef.displayId,
             )
             t0 = time.monotonic()
 
@@ -65,7 +68,7 @@ class Reviewer:
                 project_key, repo_slug, pr_id
             )
             if not diff.strip():
-                logger.info("PR %d has empty diff, skipping", pr_id)
+                logger.info("%s has empty diff, skipping", pr_tag)
                 return
 
             # Phase 1: split by file, filter by extension/binary
@@ -73,11 +76,11 @@ class Reviewer:
             file_diffs = [fd for fd in all_file_diffs if is_reviewable_diff(fd)]
             skipped = len(all_file_diffs) - len(file_diffs)
             logger.info(
-                "PR %d: %d file(s) in diff, %d reviewable, %d skipped (binary/non-reviewable)",
-                pr_id, len(all_file_diffs), len(file_diffs), skipped,
+                "%s: %d file(s) in diff, %d reviewable, %d skipped (binary/non-reviewable)",
+                pr_tag, len(all_file_diffs), len(file_diffs), skipped,
             )
             if not file_diffs:
-                logger.info("PR %d has no reviewable files, skipping", pr_id)
+                logger.info("%s has no reviewable files, skipping", pr_tag)
                 return
 
             source_commit = pr.fromRef.latestCommit
@@ -113,7 +116,7 @@ class Reviewer:
             files = [f for f in results if f is not None]
 
             if not files:
-                logger.info("PR %d has no reviewable files after content fetch, skipping", pr_id)
+                logger.info("%s has no reviewable files after content fetch, skipping", pr_tag)
                 return
 
             repo_instructions = await self._fetch_repo_instructions(
@@ -153,7 +156,7 @@ class Reviewer:
 
             elapsed = time.monotonic() - t0
             parts = [
-                f"Review of PR {pr_id} completed in {elapsed:.1f}s",
+                f"Review of {pr_tag} completed in {elapsed:.1f}s",
                 f"{len(findings)} issue{'s' if len(findings) != 1 else ''}",
                 f"{posted} comment{'s' if posted != 1 else ''} posted",
             ]
@@ -161,7 +164,7 @@ class Reviewer:
                 parts.append(f"{failed} failed")
             logger.info(" — ".join(parts))
         except Exception:
-            logger.error("Review failed for PR", exc_info=True)
+            logger.error("Review of %s failed", pr_tag, exc_info=True)
 
     def _extract_project_repo(
         self, payload: WebhookPayload
