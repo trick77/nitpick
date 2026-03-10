@@ -6,6 +6,8 @@ AI-powered code review bridge for self-hosted Bitbucket Server. The name is Germ
 
 Brings automated AI code review to on-premise Bitbucket Server installations. Receives PR webhooks, sends diffs to the GitHub Models API, and posts findings back as inline comments plus a summary comment on the PR.
 
+![Noergler inline review comment](noergler.png)
+
 ## How it works
 
 1. **Webhook** — Bitbucket Server fires a `pr:opened` or `pr:modified` event to the `/webhook` endpoint. The request is validated via HMAC-SHA256.
