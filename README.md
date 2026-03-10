@@ -12,7 +12,7 @@ Brings automated AI code review to on-premise Bitbucket Server installations. Re
 2. **Diff fetch** — The full PR diff is fetched from Bitbucket, split by file, and filtered (binary files, non-reviewable extensions, and files exceeding the configured line limit are skipped).
 3. **Context enrichment** — Full file content is fetched for each reviewable file so the AI has complete context, not just the diff. If an `AGENTS.md` file exists in the repository root, it is loaded and included as project-specific review guidelines.
 4. **AI review** — Files are grouped into token-aware chunks and sent to the GitHub Models API with a structured review prompt. Each chunk is reviewed independently.
-5. **Post results** — Findings are deduplicated against existing Nörgler comments, sorted by severity (errors first), capped at the configured limit, and posted as inline comments. A summary comment is added to the PR.
+5. **Post results** — Findings are deduplicated against existing Noergler comments, sorted by severity (errors first), capped at the configured limit, and posted as inline comments. A summary comment is added to the PR.
 
 ## Quick start
 
@@ -84,7 +84,7 @@ Edit `prompts/review.txt` to change the review focus, tone, or output format. Th
 
 ### AGENTS.md
 
-Drop an `AGENTS.md` file in the repository root to provide project-specific review guidelines. Nörgler automatically picks it up from the PR source branch (falling back to the target branch) and injects the content into the review prompt. Use it to tell the reviewer about project conventions, forbidden patterns, or areas to focus on.
+Drop an `AGENTS.md` file in the repository root to provide project-specific review guidelines. Noergler automatically picks it up from the PR source branch (falling back to the target branch) and injects the content into the review prompt. Use it to tell the reviewer about project conventions, forbidden patterns, or areas to focus on.
 
 ## Running tests
 

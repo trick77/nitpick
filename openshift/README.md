@@ -1,4 +1,4 @@
-# Nörgler OpenShift Deployment
+# Noergler OpenShift Deployment
 
 ## Prerequisites
 
