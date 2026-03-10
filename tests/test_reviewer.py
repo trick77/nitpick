@@ -250,6 +250,10 @@ class TestReviewer:
         assert reviewer.is_author_allowed("jan.username") is True
         assert reviewer.is_author_allowed("other.user") is False
 
+    def test_is_author_allowed_empty_list(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=[])
+        assert rev.is_author_allowed("anyone") is True
+
     def test_build_summary_mixed(self, reviewer):
         findings = [
             ReviewFinding(file="a.py", line=1, severity="error", comment="err"),

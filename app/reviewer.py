@@ -28,7 +28,7 @@ class Reviewer:
         self.context_lines = context_lines
 
     def is_author_allowed(self, author_name: str) -> bool:
-        return author_name in self.allowed_authors
+        return not self.allowed_authors or author_name in self.allowed_authors
 
     async def review_pull_request(self, payload: WebhookPayload) -> None:
         try:
