@@ -129,6 +129,3 @@ certs/             # Custom CA certificates (optional)
 tests/             # pytest test suite
 ```
 
-## License
-
-[MIT](LICENSE)
