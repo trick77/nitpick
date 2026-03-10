@@ -70,7 +70,7 @@ All configuration is driven by environment variables (loaded from `.env` via pyt
 2. Set the generated value as `BITBUCKET_WEBHOOK_SECRET` in your `.env` file.
 
 3. In Bitbucket Server, go to **Repository settings > Webhooks > Create webhook**:
-   - **URL:** `http://<host>:8080/webhook`
+   - **URL:** `https://<host>:8080/webhook`
    - **Secret:** paste the same secret from step 1
    - **Events:** `pr:opened`, `pr:modified`
 
