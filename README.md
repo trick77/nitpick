@@ -19,6 +19,7 @@ cp .env.example .env
 | `BITBUCKET_WEBHOOK_SECRET` | No | Webhook HMAC secret for signature validation |
 | `GITHUB_TOKEN` | Yes | GitHub fine-grained access token with `models:read` scope |
 | `REVIEW_ALLOWED_AUTHORS` | Yes | Comma-separated list of Bitbucket usernames to review |
+| `REVIEW_CONTEXT_LINES` | No | Lines of context around each diff hunk (default: `20`) |
 
 Only PRs by authors listed in `REVIEW_ALLOWED_AUTHORS` will be reviewed; all others are ignored.
 

@@ -19,11 +19,13 @@ class Reviewer:
         copilot: CopilotClient,
         allowed_authors: list[str],
         max_comments: int = 25,
+        context_lines: int = 0,
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
         self.allowed_authors = allowed_authors
         self.max_comments = max_comments
+        self.context_lines = context_lines
 
     def is_author_allowed(self, author_name: str) -> bool:
         return author_name in self.allowed_authors
@@ -47,7 +49,9 @@ class Reviewer:
         logger.info("Starting review of PR %d by %s", pr_id, author_name)
         t0 = time.monotonic()
 
-        diff = await self.bitbucket.fetch_pr_diff(project_key, repo_slug, pr_id)
+        diff = await self.bitbucket.fetch_pr_diff(
+            project_key, repo_slug, pr_id, context_lines=self.context_lines
+        )
         if not diff.strip():
             logger.info("PR %d has empty diff, skipping", pr_id)
             return

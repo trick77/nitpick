@@ -27,10 +27,13 @@ class BitbucketClient:
     async def close(self):
         await self.client.aclose()
 
-    async def fetch_pr_diff(self, project: str, repo: str, pr_id: int) -> str:
+    async def fetch_pr_diff(
+        self, project: str, repo: str, pr_id: int, context_lines: int = 0
+    ) -> str:
         url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/diff"
+        params = {"contextLines": context_lines} if context_lines > 0 else {}
         response = await self.client.get(
-            url, headers={"Accept": "text/plain"}
+            url, headers={"Accept": "text/plain"}, params=params
         )
         response.raise_for_status()
         return response.text

@@ -210,7 +210,9 @@ class TestReviewer:
         payload = _make_payload("jan.username")
         await reviewer.review_pull_request(payload)
 
-        mock_bitbucket.fetch_pr_diff.assert_called_once_with("PROJ", "my-repo", 42)
+        mock_bitbucket.fetch_pr_diff.assert_called_once_with(
+            "PROJ", "my-repo", 42, context_lines=0
+        )
         mock_copilot.review_diff.assert_called_once()
         mock_bitbucket.post_inline_comment.assert_called_once()
         mock_bitbucket.post_pr_comment.assert_called_once()
@@ -269,7 +271,9 @@ class TestReviewer:
         reviewer = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["username"])
         await reviewer.review_pull_request(payload)
 
-        mock_bitbucket.fetch_pr_diff.assert_called_once_with("~USERNAME", "test", 1)
+        mock_bitbucket.fetch_pr_diff.assert_called_once_with(
+            "~USERNAME", "test", 1, context_lines=0
+        )
         mock_copilot.review_diff.assert_called_once()
         mock_bitbucket.post_inline_comment.assert_called_once()
         mock_bitbucket.post_pr_comment.assert_called_once()

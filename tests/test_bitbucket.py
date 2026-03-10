@@ -38,6 +38,32 @@ class TestBitbucketClient:
 
     @pytest.mark.asyncio
     @respx.mock
+    async def test_fetch_pr_diff_with_context_lines(self, client):
+        diff_text = "diff --git a/file.py b/file.py\n+hello\n"
+        route = respx.get(
+            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/pull-requests/1/diff"
+        ).mock(return_value=httpx.Response(200, text=diff_text))
+
+        result = await client.fetch_pr_diff("PROJ", "my-repo", 1, context_lines=20)
+        assert result == diff_text
+        assert route.calls[0].request.url.params["contextLines"] == "20"
+        await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_fetch_pr_diff_no_context_lines_param_by_default(self, client):
+        diff_text = "diff --git a/file.py b/file.py\n+hello\n"
+        route = respx.get(
+            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/pull-requests/1/diff"
+        ).mock(return_value=httpx.Response(200, text=diff_text))
+
+        result = await client.fetch_pr_diff("PROJ", "my-repo", 1)
+        assert result == diff_text
+        assert "contextLines" not in route.calls[0].request.url.params
+        await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_fetch_file_content(self, client):
         content = "print('hello')\n"
         respx.get(
