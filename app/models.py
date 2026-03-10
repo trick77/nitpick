@@ -30,14 +30,22 @@ class PullRequestParticipant(BaseModel):
 class PullRequest(BaseModel):
     id: int
     title: str
+    state: str | None = None
     fromRef: PullRequestRef
     toRef: PullRequestRef
     author: PullRequestParticipant
 
 
+class Comment(BaseModel):
+    id: int
+    text: str
+    author: PullRequestUser
+
+
 class WebhookPayload(BaseModel):
     eventKey: str
     pullRequest: PullRequest
+    comment: Comment | None = None
     actor: PullRequestUser | None = None
 
 

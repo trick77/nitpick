@@ -138,6 +138,24 @@ class TestBitbucketClient:
 
     @pytest.mark.asyncio
     @respx.mock
+    async def test_reply_to_comment(self, client):
+        import json as _json
+
+        route = respx.post(
+            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/pull-requests/1/comments"
+        ).mock(return_value=httpx.Response(201, json={"id": 99}))
+
+        await client.reply_to_comment("PROJ", "my-repo", 1, 42, "Here is the answer")
+
+        assert route.call_count == 1
+        body = _json.loads(route.calls[0].request.content)
+        assert body["parent"]["id"] == 42
+        assert NOERGLER_MARKER in body["text"]
+        assert "Here is the answer" in body["text"]
+        await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_fetch_pr_comments(self, client):
         activities_response = {
             "values": [

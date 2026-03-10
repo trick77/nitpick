@@ -89,6 +89,19 @@ class BitbucketClient:
         response.raise_for_status()
         logger.debug("Posted summary comment on PR %d", pr_id)
 
+    async def reply_to_comment(
+        self, project: str, repo: str, pr_id: int,
+        parent_comment_id: int, text: str,
+    ) -> None:
+        url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments"
+        payload = {
+            "text": f"{text}\n\n{NOERGLER_MARKER}",
+            "parent": {"id": parent_comment_id},
+        }
+        response = await self.client.post(url, json=payload)
+        response.raise_for_status()
+        logger.debug("Replied to comment %d on PR %d", parent_comment_id, pr_id)
+
     async def fetch_pr_comments(
         self, project: str, repo: str, pr_id: int
     ) -> list[dict]:

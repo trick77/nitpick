@@ -34,6 +34,18 @@ PR_PAYLOAD = {
     },
 }
 
+COMMENT_MENTION_PAYLOAD = {
+    "eventKey": "pr:comment:added",
+    "comment": {"id": 100, "text": "@noergler explain this", "author": {"name": "someone"}},
+    "pullRequest": PR_PAYLOAD["pullRequest"],
+}
+
+COMMENT_NO_MENTION_PAYLOAD = {
+    "eventKey": "pr:comment:added",
+    "comment": {"id": 101, "text": "just a regular comment", "author": {"name": "someone"}},
+    "pullRequest": PR_PAYLOAD["pullRequest"],
+}
+
 NON_PR_PAYLOAD = {"eventKey": "repo:refs_changed"}
 
 
@@ -46,9 +58,11 @@ def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
 def client():
     mock_config = type("C", (), {
         "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET})(),
+        "review": type("R", (), {"mention_trigger": "noergler"})(),
     })()
     mock_reviewer = AsyncMock()
     mock_reviewer.review_pull_request = AsyncMock()
+    mock_reviewer.handle_mention = AsyncMock()
 
     original_config = main_module.config
     original_reviewer = main_module.reviewer
@@ -126,3 +140,43 @@ class TestWebhookSignature:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ignored"
+
+
+class TestMentionRouting:
+    def test_comment_with_mention_accepted(self, client):
+        body = json.dumps(COMMENT_MENTION_PAYLOAD).encode()
+        resp = client.post(
+            "/webhook",
+            content=body,
+            headers={"X-Hub-Signature": _sign(body), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "accepted"
+        assert data["reason"] == "mention"
+
+    def test_comment_without_mention_ignored(self, client):
+        body = json.dumps(COMMENT_NO_MENTION_PAYLOAD).encode()
+        resp = client.post(
+            "/webhook",
+            content=body,
+            headers={"X-Hub-Signature": _sign(body), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ignored"
+        assert data["reason"] == "comment without mention"
+
+    def test_comment_mention_case_insensitive(self, client):
+        payload = {**COMMENT_MENTION_PAYLOAD, "comment": {
+            "id": 102, "text": "@NOERGLER explain this", "author": {"name": "someone"},
+        }}
+        body = json.dumps(payload).encode()
+        resp = client.post(
+            "/webhook",
+            content=body,
+            headers={"X-Hub-Signature": _sign(body), "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "accepted"
+        assert resp.json()["reason"] == "mention"

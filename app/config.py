@@ -23,6 +23,8 @@ class ReviewConfig(BaseModel):
     max_lines_per_file: int = 1000
     review_prompt_template: str = "prompts/review.txt"
     review_tone: str = "default"
+    mention_trigger: str = "noergler"
+    mention_prompt_template: str = "prompts/mention.txt"
 
     @field_validator("allowed_authors", mode="before")
     @classmethod
@@ -87,6 +89,8 @@ def load_config() -> AppConfig:
             max_lines_per_file=int(_env("REVIEW_MAX_LINES_PER_FILE", "1000")),
             review_prompt_template=_env("REVIEW_PROMPT_TEMPLATE", "prompts/review.txt"),
             review_tone=_env("REVIEW_TONE", "default"),
+            mention_trigger=_env("REVIEW_MENTION_TRIGGER", "noergler"),
+            mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
         ),
         server=ServerConfig(
             host=_env("SERVER_HOST", "0.0.0.0"),

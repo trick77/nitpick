@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
         config.review.allowed_authors,
         max_comments=config.review.max_comments,
         max_lines_per_file=config.review.max_lines_per_file,
+        mention_trigger=config.review.mention_trigger,
     )
 
     await copilot_client.validate_model()
@@ -109,6 +110,14 @@ async def webhook(
     except Exception as e:
         logger.error("Failed to parse webhook payload: %s", e)
         raise HTTPException(status_code=400, detail="Invalid payload")
+
+    if event_key == "pr:comment:added":
+        comment_text = payload_json.get("comment", {}).get("text", "")
+        trigger = f"@{config.review.mention_trigger}"
+        if trigger.lower() in comment_text.lower():
+            background_tasks.add_task(reviewer.handle_mention, payload)
+            return {"status": "accepted", "reason": "mention"}
+        return {"status": "ignored", "reason": "comment without mention"}
 
     background_tasks.add_task(reviewer.review_pull_request, payload)
     return {"status": "accepted", "pr_id": payload.pullRequest.id}

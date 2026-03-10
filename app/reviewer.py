@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"error": 0, "warning": 1, "info": 2}
 _SEVERITY_RE = re.compile(r"\*\*\[(\w+)\]\*\*")
+_REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
+
+
+def _extract_question(text: str, trigger: str) -> str:
+    return re.sub(rf"@{re.escape(trigger)}\b", "", text, flags=re.IGNORECASE).strip()
 
 
 class Reviewer:
@@ -28,12 +33,14 @@ class Reviewer:
         allowed_authors: list[str],
         max_comments: int = 25,
         max_lines_per_file: int = 1000,
+        mention_trigger: str = "noergler",
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
         self.allowed_authors = allowed_authors
         self.max_comments = max_comments
         self.max_lines_per_file = max_lines_per_file
+        self.mention_trigger = mention_trigger
 
     def is_author_allowed(self, author_name: str) -> bool:
         return not self.allowed_authors or author_name in self.allowed_authors
@@ -165,6 +172,48 @@ class Reviewer:
             logger.info(" — ".join(parts))
         except Exception:
             logger.error("Review of %s failed", pr_tag, exc_info=True)
+
+    async def handle_mention(self, payload: WebhookPayload) -> None:
+        comment = payload.comment
+        if not comment:
+            return
+
+        if NOERGLER_MARKER in comment.text:
+            logger.debug("Ignoring own comment (marker found)")
+            return
+
+        pr = payload.pullRequest
+        if pr.state and pr.state != "OPEN":
+            logger.info("Ignoring mention on non-open PR (state=%s)", pr.state)
+            return
+
+        question = _extract_question(comment.text, self.mention_trigger)
+
+        if not question or question.lower() in _REVIEW_KEYWORDS:
+            logger.info("Mention triggers full review (question=%r)", question)
+            await self.review_pull_request(payload)
+            return
+
+        project_key, repo_slug = self._extract_project_repo(payload)
+        if not project_key or not repo_slug:
+            logger.error("Could not extract project/repo from webhook payload")
+            return
+
+        pr_tag = f"{project_key}/{repo_slug}#{pr.id}"
+        logger.info("Handling mention Q&A on %s: %r", pr_tag, question)
+
+        try:
+            diff = await self.bitbucket.fetch_pr_diff(project_key, repo_slug, pr.id)
+            repo_instructions = await self._fetch_repo_instructions(
+                project_key, repo_slug, pr
+            )
+            answer = await self.copilot.answer_question(question, diff, repo_instructions)
+            await self.bitbucket.reply_to_comment(
+                project_key, repo_slug, pr.id, comment.id, answer,
+            )
+            logger.info("Posted Q&A reply on %s", pr_tag)
+        except Exception:
+            logger.error("Mention Q&A on %s failed", pr_tag, exc_info=True)
 
     def _extract_project_repo(
         self, payload: WebhookPayload
