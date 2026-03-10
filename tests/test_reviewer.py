@@ -294,12 +294,12 @@ class TestReviewer:
         ]
         summary = reviewer._build_summary(findings)
         assert "3 issues found" in summary
-        assert "1 error" in summary
-        assert "1 warning" in summary
-        assert "1 info" in summary
+        assert "| 🔴 Error" in summary
+        assert "| 🟠 Warning" in summary
+        assert "| 🔵 Info" in summary
 
     def test_build_summary_empty(self, reviewer):
-        assert "No issues found" in reviewer._build_summary([])
+        assert "No issues found. ✅" in reviewer._build_summary([])
 
     @pytest.mark.asyncio
     async def test_review_real_webhook_payload(self, mock_bitbucket, mock_copilot):

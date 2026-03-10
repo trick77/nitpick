@@ -219,21 +219,27 @@ class Reviewer:
         self, findings: list[ReviewFinding], truncated: bool = False
     ) -> str:
         if not findings:
-            return "**Noergler review summary:** No issues found."
+            return "**Noergler review summary:** No issues found. ✅"
 
         counts = {"error": 0, "warning": 0, "info": 0}
         for f in findings:
             counts[f.severity] = counts.get(f.severity, 0) + 1
 
-        parts = []
+        rows = []
         if counts["error"]:
-            parts.append(f"🔴 {self._plural(counts['error'], 'error')}")
+            rows.append(f"| 🔴 Error   | {counts['error']:>5} |")
         if counts["warning"]:
-            parts.append(f"🟠 {self._plural(counts['warning'], 'warning')}")
+            rows.append(f"| 🟠 Warning | {counts['warning']:>5} |")
         if counts["info"]:
-            parts.append(f"🔵 {self._plural(counts['info'], 'info')}")
+            rows.append(f"| 🔵 Info    | {counts['info']:>5} |")
 
-        summary = f"**Noergler review summary:** {self._plural(len(findings), 'issue')} found — {', '.join(parts)}"
+        table = "\n".join([
+            "| Severity | Count |",
+            "|----------|-------|",
+            *rows,
+        ])
+
+        summary = f"**Noergler review summary:** {self._plural(len(findings), 'issue')} found\n\n{table}"
         if truncated:
             summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
         return summary
