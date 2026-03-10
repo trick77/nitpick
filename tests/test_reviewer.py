@@ -294,9 +294,9 @@ class TestReviewer:
         ]
         summary = reviewer._build_summary(findings)
         assert "3 issues found" in summary
-        assert "│ 🔴 Error" in summary
-        assert "│ 🟠 Warning" in summary
-        assert "│ 🔵 Info" in summary
+        assert "| 🔴 Error" in summary
+        assert "| 🟠 Warning" in summary
+        assert "| 🔵 Info" in summary
 
     def test_build_summary_empty(self, reviewer):
         assert "No issues found. ✅" in reviewer._build_summary([])
