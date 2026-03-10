@@ -1,9 +1,17 @@
+import asyncio
 import logging
 import re
 import time
 
 from app.bitbucket import NITPICK_MARKER, BitbucketClient
-from app.copilot import CopilotClient
+from app.copilot import (
+    CopilotClient,
+    FileReviewData,
+    extract_path,
+    is_deleted,
+    is_reviewable_diff,
+    split_by_file,
+)
 from app.models import PullRequest, ReviewFinding, WebhookPayload
 
 logger = logging.getLogger(__name__)
@@ -19,13 +27,13 @@ class Reviewer:
         copilot: CopilotClient,
         allowed_authors: list[str],
         max_comments: int = 25,
-        context_lines: int = 0,
+        max_lines_per_file: int = 1000,
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
         self.allowed_authors = allowed_authors
         self.max_comments = max_comments
-        self.context_lines = context_lines
+        self.max_lines_per_file = max_lines_per_file
 
     def is_author_allowed(self, author_name: str) -> bool:
         return not self.allowed_authors or author_name in self.allowed_authors
@@ -51,17 +59,52 @@ class Reviewer:
             t0 = time.monotonic()
 
             diff = await self.bitbucket.fetch_pr_diff(
-                project_key, repo_slug, pr_id, context_lines=self.context_lines
+                project_key, repo_slug, pr_id
             )
             if not diff.strip():
                 logger.info("PR %d has empty diff, skipping", pr_id)
+                return
+
+            # Phase 1: split by file, filter by extension/binary
+            file_diffs = [fd for fd in split_by_file(diff) if is_reviewable_diff(fd)]
+            if not file_diffs:
+                logger.info("PR %d has no reviewable files, skipping", pr_id)
+                return
+
+            source_commit = pr.fromRef.latestCommit
+
+            # Fetch full file content in parallel for non-deleted files
+            async def _build_file_data(file_diff: str) -> FileReviewData | None:
+                path = extract_path(file_diff)
+                if not path:
+                    return None
+                deleted = is_deleted(file_diff)
+                content = None
+                if not deleted and source_commit:
+                    try:
+                        content = await self.bitbucket.fetch_file_content(
+                            project_key, repo_slug, source_commit, path
+                        )
+                    except Exception:
+                        logger.warning("Failed to fetch content for %s, using diff only", path)
+                # Phase 2: skip if content exceeds max_lines_per_file
+                if content and content.count("\n") + 1 > self.max_lines_per_file:
+                    logger.info("Skipping %s: content exceeds %d lines", path, self.max_lines_per_file)
+                    return None
+                return FileReviewData(path=path, diff=file_diff, content=content)
+
+            results = await asyncio.gather(*[_build_file_data(fd) for fd in file_diffs])
+            files = [f for f in results if f is not None]
+
+            if not files:
+                logger.info("PR %d has no reviewable files after content fetch, skipping", pr_id)
                 return
 
             repo_instructions = await self._fetch_repo_instructions(
                 project_key, repo_slug, pr
             )
 
-            findings = await self.copilot.review_diff(diff, repo_instructions)
+            findings = await self.copilot.review_diff(files, repo_instructions)
 
             existing = await self._fetch_existing_comments(project_key, repo_slug, pr_id)
             findings = _deduplicate(findings, existing)

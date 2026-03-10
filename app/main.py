@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
         copilot_client,
         config.review.allowed_authors,
         max_comments=config.review.max_comments,
-        context_lines=config.review.context_lines,
+        max_lines_per_file=config.review.max_lines_per_file,
     )
 
     await copilot_client.validate_model()

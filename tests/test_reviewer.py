@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.bitbucket import NITPICK_MARKER
+from app.copilot import FileReviewData
 from app.models import ReviewFinding, WebhookPayload
 from app.reviewer import Reviewer, _deduplicate, _sort_and_limit
 
@@ -183,7 +184,7 @@ def _make_real_payload() -> WebhookPayload:
 def mock_bitbucket():
     client = AsyncMock()
     client.fetch_pr_diff = AsyncMock(return_value="diff --git a/file.py b/file.py\n+hello\n")
-    client.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
+    client.fetch_file_content = AsyncMock(return_value="hello\n")
     client.fetch_pr_comments = AsyncMock(return_value=[])
     client.post_inline_comment = AsyncMock()
     client.post_pr_comment = AsyncMock()
@@ -211,9 +212,17 @@ class TestReviewer:
         await reviewer.review_pull_request(payload)
 
         mock_bitbucket.fetch_pr_diff.assert_called_once_with(
-            "PROJ", "my-repo", 42, context_lines=0
+            "PROJ", "my-repo", 42
         )
         mock_copilot.review_diff.assert_called_once()
+        # Verify FileReviewData was passed
+        call_args = mock_copilot.review_diff.call_args
+        files = call_args[0][0]
+        assert len(files) == 1
+        assert isinstance(files[0], FileReviewData)
+        assert files[0].path == "file.py"
+        assert files[0].content == "hello\n"
+
         mock_bitbucket.post_inline_comment.assert_called_once()
         mock_bitbucket.post_pr_comment.assert_called_once()
 
@@ -246,6 +255,29 @@ class TestReviewer:
         summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
         assert "No issues found" in summary_text
 
+    @pytest.mark.asyncio
+    async def test_content_fetch_failure_falls_back_to_diff_only(self, mock_bitbucket, mock_copilot):
+        mock_bitbucket.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
+        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"])
+        payload = _make_payload("jan.username")
+        await rev.review_pull_request(payload)
+
+        # Should still review, just with content=None
+        mock_copilot.review_diff.assert_called_once()
+        files = mock_copilot.review_diff.call_args[0][0]
+        assert files[0].content is None
+
+    @pytest.mark.asyncio
+    async def test_large_file_skipped_by_content_lines(self, mock_bitbucket, mock_copilot):
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value="line\n" * 1500)
+        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"], max_lines_per_file=1000)
+        mock_bitbucket.fetch_pr_diff.return_value = "diff --git a/big.py b/big.py\n+hello\n"
+        payload = _make_payload("jan.username")
+        await rev.review_pull_request(payload)
+
+        # File should be skipped, no review called
+        mock_copilot.review_diff.assert_not_called()
+
     def test_is_author_allowed(self, reviewer):
         assert reviewer.is_author_allowed("jan.username") is True
         assert reviewer.is_author_allowed("other.user") is False
@@ -276,7 +308,7 @@ class TestReviewer:
         await reviewer.review_pull_request(payload)
 
         mock_bitbucket.fetch_pr_diff.assert_called_once_with(
-            "~USERNAME", "test", 1, context_lines=0
+            "~USERNAME", "test", 1
         )
         mock_copilot.review_diff.assert_called_once()
         mock_bitbucket.post_inline_comment.assert_called_once()

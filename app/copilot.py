@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import ssl
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -11,6 +12,13 @@ from app.config import CopilotConfig, ReviewConfig
 from app.models import ReviewFinding
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FileReviewData:
+    path: str
+    diff: str
+    content: str | None = None
 
 
 def _count_tokens(text: str) -> int:
@@ -44,7 +52,8 @@ SKIP_EXTENSIONS = frozenset({
 _DIFF_PATH_RE = re.compile(r"^diff --git a/.+ b/(.+)$", re.MULTILINE)
 
 
-def _is_reviewable(file_diff: str, max_lines: int = 1000) -> bool:
+def is_reviewable_diff(file_diff: str) -> bool:
+    """Phase 1: check extension and binary markers on the diff (before fetching content)."""
     match = _DIFF_PATH_RE.match(file_diff)
     if not match:
         return True
@@ -53,69 +62,81 @@ def _is_reviewable(file_diff: str, max_lines: int = 1000) -> bool:
         return False
     if any(path.endswith(ext) for ext in SKIP_EXTENSIONS):
         return False
-    line_count = file_diff.count("\n")
-    if line_count > max_lines:
-        logger.info("Skipping %s: %d lines exceeds limit of %d", match.group(1), line_count, max_lines)
-        return False
     return True
 
 
-def split_diff_into_chunks(
-    diff_text: str, max_tokens: int, prompt_template: str, max_lines_per_file: int = 1000
-) -> list[str]:
-    prompt_overhead = _count_tokens(prompt_template.replace("{diff}", ""))
-    available_tokens = max_tokens - prompt_overhead
-
-    file_diffs = [fd for fd in _split_by_file(diff_text) if _is_reviewable(fd, max_lines_per_file)]
-
-    chunks: list[str] = []
-    current_chunk_parts: list[str] = []
-    current_tokens = 0
-
-    for file_diff in file_diffs:
-        file_tokens = _count_tokens(file_diff)
-
-        if file_tokens > available_tokens:
-            if current_chunk_parts:
-                chunks.append("\n".join(current_chunk_parts))
-                current_chunk_parts = []
-                current_tokens = 0
-            match = _DIFF_PATH_RE.match(file_diff)
-            path = match.group(1) if match else "unknown"
-            logger.warning(
-                "Skipping %s: %d tokens exceeds chunk limit of %d",
-                path, file_tokens, available_tokens,
-            )
-            continue
-
-        if current_tokens + file_tokens > available_tokens:
-            chunks.append("\n".join(current_chunk_parts))
-            current_chunk_parts = []
-            current_tokens = 0
-
-        current_chunk_parts.append(file_diff)
-        current_tokens += file_tokens
-
-    if current_chunk_parts:
-        chunks.append("\n".join(current_chunk_parts))
-
-    return chunks
+def extract_path(file_diff: str) -> str | None:
+    """Extract the file path (b/ side) from a per-file diff header."""
+    match = _DIFF_PATH_RE.match(file_diff)
+    return match.group(1) if match else None
 
 
-def _split_by_file(diff_text: str) -> list[str]:
+def is_deleted(file_diff: str) -> bool:
+    """Check if a per-file diff represents a file deletion."""
+    return "\n+++ /dev/null" in file_diff or file_diff.startswith("+++ /dev/null")
+
+
+def split_by_file(diff_text: str) -> list[str]:
     parts: list[str] = []
     current_lines: list[str] = []
-
     for line in diff_text.splitlines(keepends=True):
         if line.startswith("diff --git ") and current_lines:
             parts.append("".join(current_lines))
             current_lines = []
         current_lines.append(line)
-
     if current_lines:
         parts.append("".join(current_lines))
-
     return parts
+
+
+def _format_file_entry(file_data: FileReviewData) -> str:
+    lang = Path(file_data.path).suffix.lstrip(".")
+    parts = [f"## File: {file_data.path}"]
+    if file_data.content is not None:
+        parts.append(f"### Full file content (new version):\n```{lang}\n{file_data.content}\n```")
+    else:
+        parts.append("_(file deleted)_")
+    parts.append(f"### Changes (diff):\n```diff\n{file_data.diff}\n```")
+    return "\n".join(parts)
+
+
+def split_files_into_chunks(
+    files: list[FileReviewData], max_tokens: int, prompt_template: str
+) -> list[str]:
+    prompt_overhead = _count_tokens(prompt_template.replace("{files}", ""))
+    available_tokens = max_tokens - prompt_overhead
+
+    chunks: list[str] = []
+    current_chunk_parts: list[str] = []
+    current_tokens = 0
+
+    for file_data in files:
+        entry = _format_file_entry(file_data)
+        entry_tokens = _count_tokens(entry)
+
+        if entry_tokens > available_tokens:
+            if current_chunk_parts:
+                chunks.append("\n\n".join(current_chunk_parts))
+                current_chunk_parts = []
+                current_tokens = 0
+            logger.warning(
+                "Skipping %s: %d tokens exceeds chunk limit of %d",
+                file_data.path, entry_tokens, available_tokens,
+            )
+            continue
+
+        if current_tokens + entry_tokens > available_tokens:
+            chunks.append("\n\n".join(current_chunk_parts))
+            current_chunk_parts = []
+            current_tokens = 0
+
+        current_chunk_parts.append(entry)
+        current_tokens += entry_tokens
+
+    if current_chunk_parts:
+        chunks.append("\n\n".join(current_chunk_parts))
+
+    return chunks
 
 
 def _parse_review_response(content: str) -> list[ReviewFinding]:
@@ -191,22 +212,21 @@ class CopilotClient:
         return None
 
     async def review_diff(
-        self, diff_text: str, repo_instructions: str = ""
+        self, files: list[FileReviewData], repo_instructions: str = ""
     ) -> list[ReviewFinding]:
         template = self.prompt_template
         if repo_instructions:
             template = template.replace(
-                "{diff}",
+                "{files}",
                 "Repository-specific review instructions (AGENTS.md):\n"
                 + repo_instructions
-                + "\n\n{diff}",
+                + "\n\n{files}",
             )
 
-        chunks = split_diff_into_chunks(
-            diff_text,
+        chunks = split_files_into_chunks(
+            files,
             self.config.max_tokens_per_chunk,
             template,
-            max_lines_per_file=self.review_config.max_lines_per_file,
         )
 
         all_findings: list[ReviewFinding] = []
@@ -214,7 +234,7 @@ class CopilotClient:
         total_completion_tokens = 0
         for i, chunk in enumerate(chunks):
             logger.info("Reviewing chunk %d/%d", i + 1, len(chunks))
-            prompt = template.replace("{diff}", chunk)
+            prompt = template.replace("{files}", chunk)
             findings, prompt_tokens, completion_tokens = await self._call_api(prompt)
             all_findings.extend(findings)
             total_prompt_tokens += prompt_tokens
