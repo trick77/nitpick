@@ -12,14 +12,22 @@ Copy `.env.example` to `.env` and fill in the values:
 cp .env.example .env
 ```
 
-| Variable | Required | Description |
-|---|---|---|
-| `BITBUCKET_URL` | Yes | Bitbucket Server base URL |
-| `BITBUCKET_TOKEN` | Yes | Bitbucket Server API token |
-| `BITBUCKET_WEBHOOK_SECRET` | No | Webhook HMAC secret for signature validation |
-| `GITHUB_TOKEN` | Yes | GitHub fine-grained access token with `models:read` scope |
-| `REVIEW_ALLOWED_AUTHORS` | Yes | Comma-separated list of Bitbucket usernames to review |
-| `REVIEW_CONTEXT_LINES` | No | Lines of context around each diff hunk (default: `20`) |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BITBUCKET_URL` | Yes | — | Bitbucket Server base URL |
+| `BITBUCKET_TOKEN` | Yes | — | Bitbucket Server API token |
+| `BITBUCKET_WEBHOOK_SECRET` | No | — | Webhook HMAC secret for signature validation |
+| `GITHUB_TOKEN` | Yes | — | GitHub fine-grained access token with `models:read` scope |
+| `REVIEW_ALLOWED_AUTHORS` | Yes | — | Comma-separated list of Bitbucket usernames to review |
+| `REVIEW_CONTEXT_LINES` | No | `20` | Lines of context around each diff hunk |
+| `REVIEW_MAX_COMMENTS` | No | `25` | Maximum inline comments per review |
+| `REVIEW_MAX_LINES_PER_FILE` | No | `1000` | Skip files exceeding this line count in the diff |
+| `REVIEW_PROMPT_TEMPLATE` | No | `prompts/review.txt` | Path to the review prompt template |
+| `COPILOT_MODEL` | No | `openai/gpt-4.1` | Model ID for the GitHub Models API |
+| `COPILOT_API_URL` | No | `https://models.github.ai/inference/chat/completions` | GitHub Models API endpoint |
+| `COPILOT_MAX_TOKENS` | No | `80000` | Max tokens per diff chunk sent to the model |
+| `SERVER_HOST` | No | `0.0.0.0` | Host to bind the server to |
+| `SERVER_PORT` | No | `8080` | Port to bind the server to |
 
 Only PRs by authors listed in `REVIEW_ALLOWED_AUTHORS` will be reviewed; all others are ignored.
 
