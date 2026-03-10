@@ -77,13 +77,13 @@ class TestSplitDiffIntoChunks:
         assert "file.py" in chunks[0]
 
     def test_multiple_files_split(self):
-        # Create a diff with two files, each large enough to exceed the limit
+        # Create a diff with two files, each fitting individually but not together
         file_a = "diff --git a/a.py b/a.py\n" + "+added line\n" * 50
         file_b = "diff --git a/b.py b/b.py\n" + "+another line\n" * 50
         diff = file_a + file_b
         template = "Review:\n{diff}"
-        # Token limit just big enough for one file but not both
-        chunks = split_diff_into_chunks(diff, 200, template)
+        # Token limit big enough for one file (~210 tokens each) but not both
+        chunks = split_diff_into_chunks(diff, 250, template)
         assert len(chunks) >= 2
 
 
@@ -154,6 +154,35 @@ class TestIsReviewable:
         assert "main.py" in full
         assert "logo.png" not in full
         assert "package.json" not in full
+
+
+    def test_oversized_single_file_skipped(self):
+        """A file diff exceeding the token limit should be skipped entirely."""
+        huge_diff = "diff --git a/huge.py b/huge.py\n" + "+x = 1\n" * 5000
+        template = "Review:\n{diff}"
+        # Use a small token limit so the file exceeds it
+        chunks = split_diff_into_chunks(huge_diff, 200, template)
+        assert chunks == []
+
+    def test_oversized_file_skipped_but_small_file_kept(self):
+        """Only the oversized file is skipped; smaller files are still chunked."""
+        small_diff = "diff --git a/small.py b/small.py\n+ok\n"
+        huge_diff = "diff --git a/huge.py b/huge.py\n" + "+x = 1\n" * 5000
+        combined = small_diff + huge_diff
+        template = "Review:\n{diff}"
+        chunks = split_diff_into_chunks(combined, 200, template)
+        full = "\n".join(chunks)
+        assert "small.py" in full
+        assert "huge.py" not in full
+
+    def test_all_files_oversized_returns_empty(self):
+        """When every file exceeds the limit, return empty list (not the raw diff)."""
+        big_a = "diff --git a/a.py b/a.py\n" + "+line\n" * 5000
+        big_b = "diff --git a/b.py b/b.py\n" + "+line\n" * 5000
+        combined = big_a + big_b
+        template = "Review:\n{diff}"
+        chunks = split_diff_into_chunks(combined, 200, template)
+        assert chunks == []
 
 
 class TestSystemMessage:

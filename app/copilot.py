@@ -80,7 +80,12 @@ def split_diff_into_chunks(
                 chunks.append("\n".join(current_chunk_parts))
                 current_chunk_parts = []
                 current_tokens = 0
-            chunks.append(file_diff)
+            match = _DIFF_PATH_RE.match(file_diff)
+            path = match.group(1) if match else "unknown"
+            logger.warning(
+                "Skipping %s: %d tokens exceeds chunk limit of %d",
+                path, file_tokens, available_tokens,
+            )
             continue
 
         if current_tokens + file_tokens > available_tokens:
@@ -94,7 +99,7 @@ def split_diff_into_chunks(
     if current_chunk_parts:
         chunks.append("\n".join(current_chunk_parts))
 
-    return chunks if chunks else [diff_text]
+    return chunks
 
 
 def _split_by_file(diff_text: str) -> list[str]:
