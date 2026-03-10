@@ -235,7 +235,7 @@ class Reviewer:
 
         table = "\n".join([
             "| Severity | Count |",
-            "|----------|-------|",
+            "|----------|------:|",
             *rows,
         ])
 
