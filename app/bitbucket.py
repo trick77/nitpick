@@ -9,7 +9,7 @@ from app.models import ReviewFinding
 
 logger = logging.getLogger(__name__)
 
-NITPICK_MARKER = "— _nitpick_"
+NITPICK_MARKER = "— _nörgler_"
 
 
 class BitbucketClient:

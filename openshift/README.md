@@ -1,21 +1,21 @@
-# Nitpick OpenShift Deployment
+# Nörgler OpenShift Deployment
 
 ## Prerequisites
 
 - `oc` CLI installed and logged in to the cluster
 - A project/namespace to deploy into
-- Access to a container registry (replace `registry.example.com/nitpick` below with your actual registry and namespace)
+- Access to a container registry (replace `registry.example.com/noergler` below with your actual registry and namespace)
 
 ## 1. Create project
 
 ```bash
-oc new-project nitpick
+oc new-project noergler
 ```
 
 ## 2. Create the secret
 
 ```bash
-oc create secret generic nitpick \
+oc create secret generic noergler \
   --from-literal=BITBUCKET_URL=https://bitbucket.company.com \
   --from-literal=BITBUCKET_TOKEN=<your-token> \
   --from-literal=BITBUCKET_WEBHOOK_SECRET=<your-secret> \
@@ -34,22 +34,22 @@ oc apply -f openshift/
 From the repository root, build the container image and push it to your registry:
 
 ```bash
-podman build -t registry.example.com/nitpick/nitpick:latest -f Containerfile .
-podman push registry.example.com/nitpick/nitpick:latest
+podman build -t registry.example.com/noergler/noergler:latest -f Containerfile .
+podman push registry.example.com/noergler/noergler:latest
 ```
 
 Then restart the deployment to pick up the new image:
 
 ```bash
-oc rollout restart deploy/nitpick
+oc rollout restart deploy/noergler
 ```
 
 ## 5. Verify
 
 ```bash
 oc get pods
-oc logs deploy/nitpick
-curl https://nitpick.example.com/health
+oc logs deploy/noergler
+curl https://noergler.example.com/health
 ```
 
 Expected health response: `{"status": "ok"}`
@@ -59,7 +59,7 @@ Expected health response: `{"status": "ok"}`
 In Bitbucket Server, add a webhook pointing to:
 
 ```
-https://nitpick.example.com/webhook
+https://noergler.example.com/webhook
 ```
 
 Create the route manually before configuring the webhook.
@@ -69,7 +69,7 @@ Create the route manually before configuring the webhook.
 After code changes, build and push the updated image:
 
 ```bash
-podman build -t registry.example.com/nitpick/nitpick:latest -f Containerfile .
-podman push registry.example.com/nitpick/nitpick:latest
-oc rollout restart deploy/nitpick
+podman build -t registry.example.com/noergler/noergler:latest -f Containerfile .
+podman push registry.example.com/noergler/noergler:latest
+oc rollout restart deploy/noergler
 ```

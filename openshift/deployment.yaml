@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nitpick
+  name: noergler
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: nitpick
+      app: noergler
   template:
     metadata:
       labels:
-        app: nitpick
+        app: noergler
     spec:
       containers:
-        - name: nitpick
-          image: registry.example.com/nitpick/nitpick:latest
+        - name: noergler
+          image: registry.example.com/noergler/noergler:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
           envFrom:
             - secretRef:
-                name: nitpick
+                name: noergler
           livenessProbe:
             httpGet:
               path: /health

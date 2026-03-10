@@ -1,5 +1,5 @@
 services:
-  nitpick:
+  noergler:
     build:
       context: .
       dockerfile: Containerfile

@@ -194,7 +194,7 @@ class Reviewer:
         self, findings: list[ReviewFinding], truncated: bool = False
     ) -> str:
         if not findings:
-            return "**Nitpick Review:** No issues found."
+            return "**Nörgler Review:** No issues found."
 
         counts = {"error": 0, "warning": 0, "info": 0}
         for f in findings:
@@ -208,7 +208,7 @@ class Reviewer:
         if counts["info"]:
             parts.append(f"{counts['info']} info")
 
-        summary = f"**Nitpick Review:** {len(findings)} issue(s) found — {', '.join(parts)}"
+        summary = f"**Nörgler Review:** {len(findings)} issue(s) found — {', '.join(parts)}"
         if truncated:
             summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
         return summary
