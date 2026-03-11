@@ -134,7 +134,7 @@ class Reviewer:
             repo_instructions = await self._fetch_repo_instructions(
                 project_key, repo_slug, pr
             )
-            agents_md_missing = not repo_instructions and not any(
+            agents_md_found = bool(repo_instructions) or any(
                 f.path == "AGENTS.md" for f in files
             )
 
@@ -162,7 +162,7 @@ class Reviewer:
                         exc_info=True,
                     )
 
-            summary = self._build_summary(findings, truncated, agents_md_missing=agents_md_missing)
+            summary = self._build_summary(findings, truncated, agents_md_found=agents_md_found)
             try:
                 await self.bitbucket.post_pr_comment(
                     project_key, repo_slug, pr_id, summary
@@ -278,7 +278,7 @@ class Reviewer:
         self,
         findings: list[ReviewFinding],
         truncated: bool = False,
-        agents_md_missing: bool = False,
+        agents_md_found: bool = False,
     ) -> str:
         if not findings:
             summary = "**Noergler review summary:** No issues found. ✅"
@@ -305,7 +305,9 @@ class Reviewer:
             if truncated:
                 summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
 
-        if agents_md_missing:
+        if agents_md_found:
+            summary += "\n\n✅ _Using project-specific review guidelines from `AGENTS.md`._"
+        else:
             summary += "\n\n💡 _Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback._"
         return summary
 

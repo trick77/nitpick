@@ -395,25 +395,33 @@ class TestDedupAndLimit:
         assert "2 issues found" in summary
         assert "Additional findings were omitted" in summary
 
-    def test_build_summary_agents_md_missing(self, reviewer):
+    def test_build_summary_agents_md_not_found(self, reviewer):
         findings = [
             ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
         ]
-        summary = reviewer._build_summary(findings, agents_md_missing=True)
+        summary = reviewer._build_summary(findings, agents_md_found=False)
         assert "AGENTS.md" in summary
         assert "Tip:" in summary
 
-    def test_build_summary_agents_md_present(self, reviewer):
+    def test_build_summary_agents_md_found(self, reviewer):
         findings = [
             ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
         ]
-        summary = reviewer._build_summary(findings, agents_md_missing=False)
-        assert "AGENTS.md" not in summary
+        summary = reviewer._build_summary(findings, agents_md_found=True)
+        assert "✅" in summary
+        assert "Using project-specific review guidelines" in summary
+        assert "Tip:" not in summary
 
-    def test_build_summary_no_findings_agents_md_missing(self, reviewer):
-        summary = reviewer._build_summary([], agents_md_missing=True)
+    def test_build_summary_no_findings_agents_md_not_found(self, reviewer):
+        summary = reviewer._build_summary([], agents_md_found=False)
         assert "No issues found" in summary
-        assert "AGENTS.md" in summary
+        assert "Tip:" in summary
+
+    def test_build_summary_no_findings_agents_md_found(self, reviewer):
+        summary = reviewer._build_summary([], agents_md_found=True)
+        assert "No issues found" in summary
+        assert "Using project-specific review guidelines" in summary
+        assert "Tip:" not in summary
 
     @pytest.mark.asyncio
     async def test_findings_limited_in_review(self, mock_bitbucket, mock_copilot):
