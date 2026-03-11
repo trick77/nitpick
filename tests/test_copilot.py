@@ -232,10 +232,11 @@ class TestGroupFilesByTokenBudget:
     def test_single_file_fits(self):
         files = [FileReviewData(path="file.py", diff="+hello\n", content="hello\n")]
         template = "Review:\n{files}"
-        groups = _group_files_by_token_budget(files, 80000, template)
+        groups, skipped = _group_files_by_token_budget(files, 80000, template)
         assert len(groups) == 1
         assert len(groups[0]) == 1
         assert groups[0][0].path == "file.py"
+        assert skipped == []
 
     def test_multiple_files_split_by_tokens(self):
         files = [
@@ -243,14 +244,16 @@ class TestGroupFilesByTokenBudget:
             FileReviewData(path="b.py", diff="+line\n" * 50, content="line\n" * 50),
         ]
         template = "Review:\n{files}"
-        groups = _group_files_by_token_budget(files, 300, template)
+        groups, skipped = _group_files_by_token_budget(files, 300, template)
         assert len(groups) >= 2
+        assert skipped == []
 
     def test_oversized_single_file_skipped(self):
         files = [FileReviewData(path="huge.py", diff="+x = 1\n" * 5000, content="x = 1\n" * 5000)]
         template = "Review:\n{files}"
-        groups = _group_files_by_token_budget(files, 200, template)
+        groups, skipped = _group_files_by_token_budget(files, 200, template)
         assert groups == []
+        assert skipped == ["huge.py"]
 
     def test_oversized_file_skipped_but_small_kept(self):
         files = [
@@ -258,16 +261,18 @@ class TestGroupFilesByTokenBudget:
             FileReviewData(path="huge.py", diff="+x = 1\n" * 5000, content="x = 1\n" * 5000),
         ]
         template = "Review:\n{files}"
-        groups = _group_files_by_token_budget(files, 200, template)
+        groups, skipped = _group_files_by_token_budget(files, 200, template)
         paths = [f.path for g in groups for f in g]
         assert "small.py" in paths
         assert "huge.py" not in paths
+        assert skipped == ["huge.py"]
 
     def test_deleted_file_included(self):
         files = [FileReviewData(path="removed.py", diff="-old code\n", content=None)]
         template = "Review:\n{files}"
-        groups = _group_files_by_token_budget(files, 80000, template)
+        groups, skipped = _group_files_by_token_budget(files, 80000, template)
         assert len(groups) == 1
+        assert skipped == []
         rendered = _render_file_group(groups[0])
         assert "_(file deleted)_" in rendered
 
@@ -326,9 +331,9 @@ class TestCopilotClient:
                 diff="diff --git a/src/main.py b/src/main.py\n+x = 1\n",
                 content="x = 1\n",
             )]
-            findings = await client.review_diff(files)
-            assert len(findings) == 1
-            assert findings[0].severity == "warning"
+            result = await client.review_diff(files)
+            assert len(result.findings) == 1
+            assert result.findings[0].severity == "warning"
         finally:
             await client.close()
 
@@ -412,9 +417,10 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
             assert len(findings) == 2
             assert {f.file for f in findings} == {"a.py", "d.py"}
+            assert skipped == []
             assert call_count >= 3  # 1 failed + at least 2 retries
         finally:
             await client.close()
@@ -433,10 +439,11 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert pt == 0
             assert ct == 0
+            assert skipped == ["huge.py"]
         finally:
             await client.close()
 
@@ -457,8 +464,9 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct = await client._review_file_group(files, template, depth=3)
+            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=3)
             assert findings == []
+            assert set(skipped) == {"a.py", "b.py"}
         finally:
             await client.close()
 

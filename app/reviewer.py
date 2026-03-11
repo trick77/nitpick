@@ -139,10 +139,10 @@ class Reviewer:
             )
 
             tone = self._tone_for_author(author_name)
-            findings = await self.copilot.review_diff(files, repo_instructions, tone=tone)
+            result = await self.copilot.review_diff(files, repo_instructions, tone=tone)
 
             existing = await self._fetch_existing_comments(project_key, repo_slug, pr_id)
-            findings = _deduplicate(findings, existing)
+            findings = _deduplicate(result.findings, existing)
             findings, truncated = _sort_and_limit(findings, self.max_comments)
 
             posted = 0
@@ -162,7 +162,13 @@ class Reviewer:
                         exc_info=True,
                     )
 
-            summary = self._build_summary(findings, truncated, agents_md_found=agents_md_found)
+            summary = self._build_summary(
+                findings,
+                truncated,
+                agents_md_found=agents_md_found,
+                skipped_files=result.skipped_files,
+                token_usage=(result.prompt_tokens, result.completion_tokens),
+            )
             try:
                 await self.bitbucket.post_pr_comment(
                     project_key, repo_slug, pr_id, summary
@@ -279,6 +285,8 @@ class Reviewer:
         findings: list[ReviewFinding],
         truncated: bool = False,
         agents_md_found: bool = False,
+        skipped_files: list[str] | None = None,
+        token_usage: tuple[int, int] | None = None,
     ) -> str:
         if not findings:
             summary = "**Noergler review summary:** No issues found. ✅"
@@ -305,10 +313,20 @@ class Reviewer:
             if truncated:
                 summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
 
+        if skipped_files:
+            file_list = ", ".join(f"`{f}`" for f in skipped_files)
+            summary += f"\n\n⚠️ _Not reviewed (too large): {file_list}_"
+
         if agents_md_found:
             summary += "\n\n✅ _Using project-specific review guidelines from `AGENTS.md`._"
         else:
             summary += "\n\n💡 _Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback._"
+
+        if token_usage:
+            prompt_t, completion_t = token_usage
+            model = self.copilot.config.model
+            summary += f"\n\n_Model: `{model}` — tokens used: {prompt_t + completion_t:,} ({prompt_t:,} prompt + {completion_t:,} completion)_"
+
         return summary
 
 

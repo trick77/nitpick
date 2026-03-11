@@ -145,11 +145,12 @@ def _render_file_group(files: list[FileReviewData]) -> str:
 
 def _group_files_by_token_budget(
     files: list[FileReviewData], max_tokens: int, prompt_template: str
-) -> list[list[FileReviewData]]:
+) -> tuple[list[list[FileReviewData]], list[str]]:
     prompt_overhead = _count_tokens(prompt_template.replace("{files}", ""))
     available_tokens = max_tokens - prompt_overhead
 
     groups: list[list[FileReviewData]] = []
+    skipped: list[str] = []
     current_group: list[FileReviewData] = []
     current_tokens = 0
 
@@ -163,9 +164,10 @@ def _group_files_by_token_budget(
                 current_group = []
                 current_tokens = 0
             logger.warning(
-                "Skipping %s: %d tokens exceeds chunk limit of %d",
-                file_data.path, entry_tokens, available_tokens,
+                "File will not be reviewed (exceeds token limit): %s",
+                file_data.path,
             )
+            skipped.append(file_data.path)
             continue
 
         if current_tokens + entry_tokens > available_tokens:
@@ -179,7 +181,7 @@ def _group_files_by_token_budget(
     if current_group:
         groups.append(current_group)
 
-    return groups
+    return groups, skipped
 
 
 def _parse_review_response(content: str) -> list[ReviewFinding]:
@@ -268,9 +270,16 @@ class CopilotClient:
             logger.warning("Could not validate model against models API", exc_info=True)
         return None
 
+    @dataclass
+    class ReviewResult:
+        findings: list[ReviewFinding]
+        skipped_files: list[str]
+        prompt_tokens: int
+        completion_tokens: int
+
     async def review_diff(
         self, files: list[FileReviewData], repo_instructions: str = "", tone: str = "default"
-    ) -> list[ReviewFinding]:
+    ) -> "CopilotClient.ReviewResult":
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.prompt_template.replace("{tone}", tone_text)
         if repo_instructions:
@@ -281,7 +290,7 @@ class CopilotClient:
                 + "\n\n{files}",
             )
 
-        groups = _group_files_by_token_budget(
+        groups, skipped_files = _group_files_by_token_budget(
             files,
             self.config.max_tokens_per_chunk,
             template,
@@ -294,10 +303,11 @@ class CopilotClient:
             logger.info("Reviewing chunk %d/%d (%d file%s)",
                         i + 1, len(groups), len(group),
                         "" if len(group) == 1 else "s")
-            findings, prompt_tokens, completion_tokens = await self._review_file_group(
+            findings, prompt_tokens, completion_tokens, skipped = await self._review_file_group(
                 group, template, depth=0,
             )
             all_findings.extend(findings)
+            skipped_files.extend(skipped)
             total_prompt_tokens += prompt_tokens
             total_completion_tokens += completion_tokens
 
@@ -311,7 +321,12 @@ class CopilotClient:
             "" if len(groups) == 1 else "s",
         )
 
-        return all_findings
+        return CopilotClient.ReviewResult(
+            findings=all_findings,
+            skipped_files=skipped_files,
+            prompt_tokens=total_prompt_tokens,
+            completion_tokens=total_completion_tokens,
+        )
 
     async def answer_question(self, question: str, diff_context: str, repo_instructions: str = "", tone: str = "default") -> str:
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
@@ -346,30 +361,31 @@ class CopilotClient:
         template: str,
         depth: int,
         max_depth: int = 3,
-    ) -> tuple[list[ReviewFinding], int, int]:
+    ) -> tuple[list[ReviewFinding], int, int, list[str]]:
         rendered = _render_file_group(group)
         prompt = template.replace("{files}", rendered)
         try:
-            return await self._call_api(prompt)
+            findings, pt, ct = await self._call_api(prompt)
+            return findings, pt, ct, []
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 413:
                 raise
             if len(group) <= 1:
                 path = group[0].path if group else "<empty>"
                 logger.warning(
-                    "413 Payload Too Large for single file %s — skipping", path,
+                    "413 — file will not be reviewed: %s", path,
                 )
-                return [], 0, 0
+                return [], 0, 0, [path]
             if depth >= max_depth:
                 paths = [f.path for f in group]
                 logger.warning(
-                    "413 Payload Too Large after %d bisections — skipping %d files: %s",
-                    depth, len(group), paths,
+                    "413 — %d files will not be reviewed after %d bisections: %s",
+                    len(group), depth, paths,
                 )
-                return [], 0, 0
+                return [], 0, 0, paths
             mid = len(group) // 2
             logger.info(
-                "413 Payload Too Large with %d files — bisecting (depth %d)",
+                "413 with %d files — splitting chunk and retrying (depth %d)",
                 len(group), depth + 1,
             )
             left = await self._review_file_group(group[:mid], template, depth + 1, max_depth)
@@ -378,6 +394,7 @@ class CopilotClient:
                 left[0] + right[0],
                 left[1] + right[1],
                 left[2] + right[2],
+                left[3] + right[3],
             )
 
     async def _call_api(self, prompt: str) -> tuple[list[ReviewFinding], int, int]:

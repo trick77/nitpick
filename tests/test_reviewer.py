@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.bitbucket import NOERGLER_MARKER
-from app.copilot import FileReviewData
+from app.copilot import CopilotClient, FileReviewData
 from app.models import ReviewFinding, WebhookPayload
 from app.reviewer import Reviewer, _deduplicate, _sort_and_limit
 
@@ -191,12 +191,22 @@ def mock_bitbucket():
     return client
 
 
+def _make_review_result(findings=None, skipped_files=None):
+    return CopilotClient.ReviewResult(
+        findings=findings or [],
+        skipped_files=skipped_files or [],
+        prompt_tokens=100,
+        completion_tokens=50,
+    )
+
+
 @pytest.fixture
 def mock_copilot():
     client = AsyncMock()
-    client.review_diff = AsyncMock(return_value=[
+    client.config.model = "openai/gpt-4.1"
+    client.review_diff = AsyncMock(return_value=_make_review_result([
         ReviewFinding(file="file.py", line=1, severity="warning", comment="Test issue"),
-    ])
+    ]))
     return client
 
 
@@ -255,7 +265,7 @@ class TestReviewer:
 
     @pytest.mark.asyncio
     async def test_no_findings(self, reviewer, mock_bitbucket, mock_copilot):
-        mock_copilot.review_diff.return_value = []
+        mock_copilot.review_diff.return_value = _make_review_result([])
         payload = _make_payload("jan.username")
         await reviewer.review_pull_request(payload)
 
@@ -423,12 +433,35 @@ class TestDedupAndLimit:
         assert "Using project-specific review guidelines" in summary
         assert "Tip:" not in summary
 
+    def test_build_summary_skipped_files(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        summary = reviewer._build_summary(findings, skipped_files=["huge.py", "big.js"])
+        assert "Not reviewed (too large)" in summary
+        assert "`huge.py`" in summary
+        assert "`big.js`" in summary
+
+    def test_build_summary_no_skipped_files(self, reviewer):
+        summary = reviewer._build_summary([], skipped_files=[])
+        assert "Not reviewed" not in summary
+
+    def test_build_summary_token_usage(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        summary = reviewer._build_summary(findings, token_usage=(1000, 500))
+        assert "Model: `openai/gpt-4.1`" in summary
+        assert "tokens used: 1,500" in summary
+        assert "1,000 prompt" in summary
+        assert "500 completion" in summary
+
     @pytest.mark.asyncio
     async def test_findings_limited_in_review(self, mock_bitbucket, mock_copilot):
-        mock_copilot.review_diff.return_value = [
+        mock_copilot.review_diff.return_value = _make_review_result([
             ReviewFinding(file=f"f{i}.py", line=i, severity="warning", comment=f"issue {i}")
             for i in range(30)
-        ]
+        ])
         rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"], max_comments=5)
         payload = _make_payload("jan.username")
         await rev.review_pull_request(payload)
