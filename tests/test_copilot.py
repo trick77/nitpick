@@ -32,7 +32,7 @@ def copilot_config():
 @pytest.fixture
 def review_config():
     return ReviewConfig(
-        allowed_authors=["jan.username"],
+        auto_review_authors=["jan.username"],
         review_prompt_template="prompts/review.txt",
     )
 

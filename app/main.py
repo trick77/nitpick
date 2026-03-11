@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
     reviewer = Reviewer(
         bitbucket_client,
         copilot_client,
-        config.review.allowed_authors,
+        config.review.auto_review_authors,
         max_comments=config.review.max_comments,
         max_lines_per_file=config.review.max_lines_per_file,
         mention_trigger=config.review.mention_trigger,

@@ -62,7 +62,7 @@ All configuration is driven by environment variables.
 | `BITBUCKET_TOKEN` | Yes | — | Bitbucket Server API token |
 | `BITBUCKET_WEBHOOK_SECRET` | Yes | — | Webhook HMAC secret for signature validation |
 | `GITHUB_TOKEN` | Yes | — | GitHub fine-grained access token with `models:read` scope |
-| `REVIEW_ALLOWED_AUTHORS` | No | _(empty)_ | Comma-separated list of Bitbucket usernames to review. When empty or unset, all PR authors are reviewed. |
+| `REVIEW_AUTO_REVIEW_AUTHORS` | No | _(empty)_ | Comma-separated list of Bitbucket usernames whose PRs are automatically reviewed. When empty or unset, all PR authors are reviewed. Mention-triggered reviews (`@noergler review`) bypass this check. |
 | `REVIEW_MAX_COMMENTS` | No | `25` | Maximum inline comments per review |
 | `REVIEW_MAX_LINES_PER_FILE` | No | `1000` | Skip files exceeding this line count |
 | `REVIEW_PROMPT_TEMPLATE` | No | `prompts/review.txt` | Path to the review prompt template |

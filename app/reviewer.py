@@ -30,7 +30,7 @@ class Reviewer:
         self,
         bitbucket: BitbucketClient,
         copilot: CopilotClient,
-        allowed_authors: list[str],
+        auto_review_authors: list[str],
         max_comments: int = 25,
         max_lines_per_file: int = 1000,
         mention_trigger: str = "noergler",
@@ -38,7 +38,7 @@ class Reviewer:
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
-        self.allowed_authors = allowed_authors
+        self.auto_review_authors = auto_review_authors
         self.max_comments = max_comments
         self.max_lines_per_file = max_lines_per_file
         self.mention_trigger = mention_trigger
@@ -47,10 +47,10 @@ class Reviewer:
     def _tone_for_author(self, author: str) -> str:
         return "ramsay" if author in self.ramsay_authors else "default"
 
-    def is_author_allowed(self, author_name: str) -> bool:
-        return not self.allowed_authors or author_name in self.allowed_authors
+    def is_auto_review_author(self, author_name: str) -> bool:
+        return not self.auto_review_authors or author_name in self.auto_review_authors
 
-    async def review_pull_request(self, payload: WebhookPayload) -> None:
+    async def review_pull_request(self, payload: WebhookPayload, *, skip_author_check: bool = False) -> None:
         pr_tag = "unknown"
         try:
             pr = payload.pullRequest
@@ -64,9 +64,9 @@ class Reviewer:
 
             pr_tag = f"{project_key}/{repo_slug}#{pr_id}"
 
-            if not self.is_author_allowed(author_name):
+            if not skip_author_check and not self.is_auto_review_author(author_name):
                 logger.info(
-                    "Skipping %s by %s (not in allowed authors)", pr_tag, author_name
+                    "Skipping %s by %s (not in auto-review authors)", pr_tag, author_name
                 )
                 return
 
@@ -134,6 +134,9 @@ class Reviewer:
             repo_instructions = await self._fetch_repo_instructions(
                 project_key, repo_slug, pr
             )
+            agents_md_missing = not repo_instructions and not any(
+                f.path == "AGENTS.md" for f in files
+            )
 
             tone = self._tone_for_author(author_name)
             findings = await self.copilot.review_diff(files, repo_instructions, tone=tone)
@@ -159,7 +162,7 @@ class Reviewer:
                         exc_info=True,
                     )
 
-            summary = self._build_summary(findings, truncated)
+            summary = self._build_summary(findings, truncated, agents_md_missing=agents_md_missing)
             try:
                 await self.bitbucket.post_pr_comment(
                     project_key, repo_slug, pr_id, summary
@@ -197,7 +200,7 @@ class Reviewer:
 
         if not question or question.lower() in _REVIEW_KEYWORDS:
             logger.info("Mention triggers full review (question=%r)", question)
-            await self.review_pull_request(payload)
+            await self.review_pull_request(payload, skip_author_check=True)
             return
 
         project_key, repo_slug = self._extract_project_repo(payload)
@@ -272,32 +275,38 @@ class Reviewer:
         return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
     def _build_summary(
-        self, findings: list[ReviewFinding], truncated: bool = False
+        self,
+        findings: list[ReviewFinding],
+        truncated: bool = False,
+        agents_md_missing: bool = False,
     ) -> str:
         if not findings:
-            return "**Noergler review summary:** No issues found. ✅"
+            summary = "**Noergler review summary:** No issues found. ✅"
+        else:
+            counts = {"error": 0, "warning": 0, "info": 0}
+            for f in findings:
+                counts[f.severity] = counts.get(f.severity, 0) + 1
 
-        counts = {"error": 0, "warning": 0, "info": 0}
-        for f in findings:
-            counts[f.severity] = counts.get(f.severity, 0) + 1
+            rows = []
+            if counts["error"]:
+                rows.append(f"| 🔴 Error   | {counts['error']:>5} |")
+            if counts["warning"]:
+                rows.append(f"| 🟠 Warning | {counts['warning']:>5} |")
+            if counts["info"]:
+                rows.append(f"| 🔵 Info    | {counts['info']:>5} |")
 
-        rows = []
-        if counts["error"]:
-            rows.append(f"| 🔴 Error   | {counts['error']:>5} |")
-        if counts["warning"]:
-            rows.append(f"| 🟠 Warning | {counts['warning']:>5} |")
-        if counts["info"]:
-            rows.append(f"| 🔵 Info    | {counts['info']:>5} |")
+            table = "\n".join([
+                "| Severity | Count |",
+                "|----------|------:|",
+                *rows,
+            ])
 
-        table = "\n".join([
-            "| Severity | Count |",
-            "|----------|------:|",
-            *rows,
-        ])
+            summary = f"**Noergler review summary:** {self._plural(len(findings), 'issue')} found\n\n{table}"
+            if truncated:
+                summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
 
-        summary = f"**Noergler review summary:** {self._plural(len(findings), 'issue')} found\n\n{table}"
-        if truncated:
-            summary += f"\n\n_Showing top {len(findings)} findings by severity. Additional findings were omitted._"
+        if agents_md_missing:
+            summary += "\n\n💡 _Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback._"
         return summary
 
 

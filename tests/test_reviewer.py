@@ -202,7 +202,7 @@ def mock_copilot():
 
 @pytest.fixture
 def reviewer(mock_bitbucket, mock_copilot):
-    return Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"])
+    return Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"])
 
 
 class TestReviewer:
@@ -238,6 +238,14 @@ class TestReviewer:
         mock_copilot.review_diff.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_skip_author_check_allows_non_listed_author(self, reviewer, mock_bitbucket, mock_copilot):
+        payload = _make_payload("other.user")
+        await reviewer.review_pull_request(payload, skip_author_check=True)
+
+        mock_bitbucket.fetch_pr_diff.assert_called_once()
+        mock_copilot.review_diff.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_skip_empty_diff(self, reviewer, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_pr_diff.return_value = "   \n"
         payload = _make_payload("jan.username")
@@ -258,7 +266,7 @@ class TestReviewer:
     @pytest.mark.asyncio
     async def test_content_fetch_failure_falls_back_to_diff_only(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
-        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"])
+        rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"])
         payload = _make_payload("jan.username")
         await rev.review_pull_request(payload)
 
@@ -270,7 +278,7 @@ class TestReviewer:
     @pytest.mark.asyncio
     async def test_large_file_skipped_by_content_lines(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_file_content = AsyncMock(return_value="line\n" * 1500)
-        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"], max_lines_per_file=1000)
+        rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"], max_lines_per_file=1000)
         mock_bitbucket.fetch_pr_diff.return_value = "diff --git a/big.py b/big.py\n+hello\n"
         payload = _make_payload("jan.username")
         await rev.review_pull_request(payload)
@@ -278,13 +286,13 @@ class TestReviewer:
         # File should be skipped, no review called
         mock_copilot.review_diff.assert_not_called()
 
-    def test_is_author_allowed(self, reviewer):
-        assert reviewer.is_author_allowed("jan.username") is True
-        assert reviewer.is_author_allowed("other.user") is False
+    def test_is_auto_review_author(self, reviewer):
+        assert reviewer.is_auto_review_author("jan.username") is True
+        assert reviewer.is_auto_review_author("other.user") is False
 
-    def test_is_author_allowed_empty_list(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=[])
-        assert rev.is_author_allowed("anyone") is True
+    def test_is_auto_review_author_empty_list(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=[])
+        assert rev.is_auto_review_author("anyone") is True
 
     def test_build_summary_mixed(self, reviewer):
         findings = [
@@ -304,7 +312,7 @@ class TestReviewer:
     @pytest.mark.asyncio
     async def test_review_real_webhook_payload(self, mock_bitbucket, mock_copilot):
         payload = _make_real_payload()
-        reviewer = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["username"])
+        reviewer = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["username"])
         await reviewer.review_pull_request(payload)
 
         mock_bitbucket.fetch_pr_diff.assert_called_once_with(
@@ -376,7 +384,7 @@ class TestDedupAndLimit:
 
     @pytest.fixture
     def reviewer(self, mock_bitbucket, mock_copilot):
-        return Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"])
+        return Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"])
 
     def test_build_summary_truncated(self, reviewer):
         findings = [
@@ -387,13 +395,33 @@ class TestDedupAndLimit:
         assert "2 issues found" in summary
         assert "Additional findings were omitted" in summary
 
+    def test_build_summary_agents_md_missing(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        summary = reviewer._build_summary(findings, agents_md_missing=True)
+        assert "AGENTS.md" in summary
+        assert "Tip:" in summary
+
+    def test_build_summary_agents_md_present(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        summary = reviewer._build_summary(findings, agents_md_missing=False)
+        assert "AGENTS.md" not in summary
+
+    def test_build_summary_no_findings_agents_md_missing(self, reviewer):
+        summary = reviewer._build_summary([], agents_md_missing=True)
+        assert "No issues found" in summary
+        assert "AGENTS.md" in summary
+
     @pytest.mark.asyncio
     async def test_findings_limited_in_review(self, mock_bitbucket, mock_copilot):
         mock_copilot.review_diff.return_value = [
             ReviewFinding(file=f"f{i}.py", line=i, severity="warning", comment=f"issue {i}")
             for i in range(30)
         ]
-        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"], max_comments=5)
+        rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"], max_comments=5)
         payload = _make_payload("jan.username")
         await rev.review_pull_request(payload)
 
@@ -404,7 +432,7 @@ class TestDedupAndLimit:
     @pytest.mark.asyncio
     async def test_dedup_graceful_on_fetch_failure(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_pr_comments.side_effect = Exception("API error")
-        rev = Reviewer(mock_bitbucket, mock_copilot, allowed_authors=["jan.username"])
+        rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"])
         payload = _make_payload("jan.username")
         await rev.review_pull_request(payload)
 

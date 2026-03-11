@@ -18,7 +18,7 @@ class CopilotConfig(BaseModel):
 
 
 class ReviewConfig(BaseModel):
-    allowed_authors: list[str] = []
+    auto_review_authors: list[str] = []
     max_comments: int = 25
     max_lines_per_file: int = 1000
     review_prompt_template: str = "prompts/review.txt"
@@ -26,7 +26,7 @@ class ReviewConfig(BaseModel):
     mention_trigger: str = "noergler"
     mention_prompt_template: str = "prompts/mention.txt"
 
-    @field_validator("allowed_authors", "ramsay_authors", mode="before")
+    @field_validator("auto_review_authors", "ramsay_authors", mode="before")
     @classmethod
     def parse_comma_list(cls, v):
         if isinstance(v, str):
@@ -84,7 +84,7 @@ def load_config() -> AppConfig:
             max_tokens_per_chunk=int(_env("COPILOT_MAX_TOKENS", "80000")),
         ),
         review=ReviewConfig(
-            allowed_authors=_env("REVIEW_ALLOWED_AUTHORS", ""),
+            auto_review_authors=_env("REVIEW_AUTO_REVIEW_AUTHORS", ""),
             max_comments=int(_env("REVIEW_MAX_COMMENTS", "25")),
             max_lines_per_file=int(_env("REVIEW_MAX_LINES_PER_FILE", "1000")),
             review_prompt_template=_env("REVIEW_PROMPT_TEMPLATE", "prompts/review.txt"),

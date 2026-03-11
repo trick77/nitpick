@@ -17,7 +17,7 @@ def _make_config():
             max_tokens_per_chunk=80000,
         ),
         review=ReviewConfig(
-            allowed_authors=["alice", "bob"],
+            auto_review_authors=["alice", "bob"],
             max_comments=10,
             max_lines_per_file=500,
             review_prompt_template="prompts/review.txt",

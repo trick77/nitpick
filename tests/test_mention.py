@@ -65,7 +65,7 @@ def mock_copilot():
 def reviewer(mock_bitbucket, mock_copilot):
     return Reviewer(
         mock_bitbucket, mock_copilot,
-        allowed_authors=["pr-author"],
+        auto_review_authors=["pr-author"],
         mention_trigger="noergler",
     )
 
