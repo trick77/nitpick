@@ -21,7 +21,7 @@ def _make_config():
             max_comments=10,
             max_lines_per_file=500,
             review_prompt_template="prompts/review.txt",
-            review_tone="ramsay",
+            ramsay_authors=["alice"],
         ),
         server=ServerConfig(host="0.0.0.0", port=9090),
     )
@@ -47,7 +47,7 @@ def test_log_config_masks_secrets(caplog):
     assert "['alice', 'bob']" in text
     assert "10" in text
     assert "500" in text
-    assert "ramsay" in text
+    assert "alice" in text
     assert "9090" in text
 
     # Section headers must appear

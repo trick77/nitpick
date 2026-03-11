@@ -34,6 +34,7 @@ class Reviewer:
         max_comments: int = 25,
         max_lines_per_file: int = 1000,
         mention_trigger: str = "noergler",
+        ramsay_authors: list[str] | None = None,
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
@@ -41,6 +42,10 @@ class Reviewer:
         self.max_comments = max_comments
         self.max_lines_per_file = max_lines_per_file
         self.mention_trigger = mention_trigger
+        self.ramsay_authors = ramsay_authors or []
+
+    def _tone_for_author(self, author: str) -> str:
+        return "ramsay" if author in self.ramsay_authors else "default"
 
     def is_author_allowed(self, author_name: str) -> bool:
         return not self.allowed_authors or author_name in self.allowed_authors
@@ -130,7 +135,8 @@ class Reviewer:
                 project_key, repo_slug, pr
             )
 
-            findings = await self.copilot.review_diff(files, repo_instructions)
+            tone = self._tone_for_author(author_name)
+            findings = await self.copilot.review_diff(files, repo_instructions, tone=tone)
 
             existing = await self._fetch_existing_comments(project_key, repo_slug, pr_id)
             findings = _deduplicate(findings, existing)
@@ -207,7 +213,8 @@ class Reviewer:
             repo_instructions = await self._fetch_repo_instructions(
                 project_key, repo_slug, pr
             )
-            answer = await self.copilot.answer_question(question, diff, repo_instructions)
+            tone = self._tone_for_author(pr.author.user.name)
+            answer = await self.copilot.answer_question(question, diff, repo_instructions, tone=tone)
             await self.bitbucket.reply_to_comment(
                 project_key, repo_slug, pr.id, comment.id, answer,
             )

@@ -46,13 +46,11 @@ def _count_tokens(text: str) -> int:
     return len(enc.encode(text))
 
 
-def _load_prompt_template(template_path: str, tone: str = "default") -> str:
+def _load_prompt_template(template_path: str) -> str:
     path = Path(template_path)
     if not path.exists():
         raise FileNotFoundError(f"Prompt template not found: {template_path}")
-    template = path.read_text()
-    tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
-    return template.replace("{tone}", tone_text)
+    return path.read_text()
 
 
 SKIP_EXTENSIONS = frozenset({
@@ -239,11 +237,9 @@ class CopilotClient:
         )
         self.prompt_template = _load_prompt_template(
             review_config.review_prompt_template,
-            review_config.review_tone,
         )
         self.mention_template = _load_prompt_template(
             review_config.mention_prompt_template,
-            review_config.review_tone,
         )
 
     async def close(self):
@@ -273,9 +269,10 @@ class CopilotClient:
         return None
 
     async def review_diff(
-        self, files: list[FileReviewData], repo_instructions: str = ""
+        self, files: list[FileReviewData], repo_instructions: str = "", tone: str = "default"
     ) -> list[ReviewFinding]:
-        template = self.prompt_template
+        tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
+        template = self.prompt_template.replace("{tone}", tone_text)
         if repo_instructions:
             template = template.replace(
                 "{files}",
@@ -316,8 +313,9 @@ class CopilotClient:
 
         return all_findings
 
-    async def answer_question(self, question: str, diff_context: str, repo_instructions: str = "") -> str:
-        prompt = self.mention_template.replace("{diff}", diff_context)
+    async def answer_question(self, question: str, diff_context: str, repo_instructions: str = "", tone: str = "default") -> str:
+        tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
+        prompt = self.mention_template.replace("{tone}", tone_text).replace("{diff}", diff_context)
         prompt = prompt.replace("{question}", question)
         prompt = prompt.replace("{repo_instructions}", repo_instructions)
 

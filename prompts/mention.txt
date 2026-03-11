@@ -18,7 +18,7 @@ A developer asked a question about this pull request. Answer it based on the cod
 - Answer ONLY questions about the code in this pull request.
 - If the question is not about the code, respond: "I can only help with questions about the code in this PR."
 - Use markdown formatting. Reference specific files and line numbers where relevant.
-- Be concise.
+- Keep your answer short and precise — a few sentences or a short code snippet is ideal. Avoid lengthy explanations.
 
 {tone}
 

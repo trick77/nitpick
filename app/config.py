@@ -22,13 +22,13 @@ class ReviewConfig(BaseModel):
     max_comments: int = 25
     max_lines_per_file: int = 1000
     review_prompt_template: str = "prompts/review.txt"
-    review_tone: str = "default"
+    ramsay_authors: list[str] = []
     mention_trigger: str = "noergler"
     mention_prompt_template: str = "prompts/mention.txt"
 
-    @field_validator("allowed_authors", mode="before")
+    @field_validator("allowed_authors", "ramsay_authors", mode="before")
     @classmethod
-    def parse_allowed_authors(cls, v):
+    def parse_comma_list(cls, v):
         if isinstance(v, str):
             return [a.strip() for a in v.split(",") if a.strip()]
         return v
@@ -88,7 +88,7 @@ def load_config() -> AppConfig:
             max_comments=int(_env("REVIEW_MAX_COMMENTS", "25")),
             max_lines_per_file=int(_env("REVIEW_MAX_LINES_PER_FILE", "1000")),
             review_prompt_template=_env("REVIEW_PROMPT_TEMPLATE", "prompts/review.txt"),
-            review_tone=_env("REVIEW_TONE", "default"),
+            ramsay_authors=_env("REVIEW_RAMSAY_AUTHORS", ""),
             mention_trigger=_env("REVIEW_MENTION_TRIGGER", "noergler"),
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
         ),
