@@ -1,5 +1,5 @@
 <h1>
-  <img src="logo.png" alt="" width="120" align="middle">
+  <img src="logo.png" alt="" width="120" align="bottom">
   Noergler
 </h1>
 
