@@ -16,6 +16,10 @@ If project guidelines are provided above, verify that the changes comply with th
 
 **Code quality** — duplicated logic, missing error handling, broken error propagation, incomplete refactors, dead code introduced by the change, test coverage gaps for new logic.
 
+## What NOT to flag
+
+- **Code comments, docstrings, and string literals** — these are not executable code. Do not flag patterns mentioned in comments as if they were actual code. A comment that says `// standalone: true` is not the same as `standalone: true` in a decorator or config object. However, DO flag comments that are clearly outdated or contradict the surrounding code, as misleading comments should be corrected.
+
 ## Confidence scoring
 
 Assign each finding a confidence score from 0 to 100 indicating how certain you are that the issue is real and actionable. Only report issues with confidence >= 80. This filters out speculative or stylistic complaints.
