@@ -137,8 +137,10 @@ def _format_file_entry(file_data: FileReviewData) -> str:
     parts = [f"## File: {file_data.path}"]
     if file_data.content is not None:
         parts.append(f"### Full file content (new version):\n```{lang}\n{file_data.content}\n```")
-    else:
+    elif is_deleted(file_data.diff):
         parts.append("_(file deleted)_")
+    else:
+        parts.append("_(full file content omitted — review diff only)_")
     parts.append(f"### Changes (diff: lines with `-` are REMOVED, lines with `+` are ADDED):\n```diff\n{file_data.diff}\n```")
     return "\n".join(parts)
 
@@ -167,9 +169,12 @@ def _group_files_by_token_budget(
                 groups.append(current_group)
                 current_group = []
                 current_tokens = 0
+            content_lines = file_data.content.count("\n") + 1 if file_data.content else 0
+            diff_lines = file_data.diff.count("\n") + 1
             logger.warning(
-                "File will not be reviewed (exceeds token limit): %s",
-                file_data.path,
+                "File will not be reviewed (exceeds token limit): %s "
+                "(%d content lines, %d diff lines, ~%d tokens)",
+                file_data.path, content_lines, diff_lines, entry_tokens,
             )
             skipped.append(file_data.path)
             continue
@@ -374,18 +379,28 @@ class CopilotClient:
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 413:
                 raise
+            logger.warning("413 response body: %s", exc.response.text[:500])
             if len(group) <= 1:
-                path = group[0].path if group else "<empty>"
+                file = group[0] if group else None
+                if file is not None and file.content is not None:
+                    logger.info("413 — retrying without full file content: %s", file.path)
+                    diff_only = FileReviewData(path=file.path, diff=file.diff, content=None)
+                    return await self._review_file_group([diff_only], template, depth + 1, max_depth)
+                path = file.path if file else "<empty>"
                 logger.warning(
-                    "413 — file will not be reviewed: %s", path,
+                    "413 — file will not be reviewed: %s (%d diff lines, ~%d prompt tokens)",
+                    path,
+                    file.diff.count("\n") + 1 if file else 0,
+                    _count_tokens(prompt),
                 )
                 return [], 0, 0, [path]
             if depth >= max_depth:
                 paths = [f.path for f in group]
-                logger.warning(
-                    "413 — %d files will not be reviewed after %d bisections: %s",
-                    len(group), depth, paths,
-                )
+                for f in group:
+                    logger.warning(
+                        "413 — file will not be reviewed after %d bisections: %s (%d diff lines)",
+                        depth, f.path, f.diff.count("\n") + 1,
+                    )
                 return [], 0, 0, paths
             mid = len(group) // 2
             logger.info(

@@ -160,11 +160,18 @@ class TestFormatFileEntry:
         assert "```diff" in result
 
     def test_deleted_file(self):
-        f = FileReviewData(path="old.py", diff="-removed\n", content=None)
+        diff = "--- a/old.py\n+++ /dev/null\n-removed\n"
+        f = FileReviewData(path="old.py", diff=diff, content=None)
         result = _format_file_entry(f)
         assert "## File: old.py" in result
         assert "_(file deleted)_" in result
         assert "### Changes (diff: lines with `-` are REMOVED, lines with `+` are ADDED):" in result
+
+    def test_content_omitted(self):
+        f = FileReviewData(path="big.py", diff="+added\n", content=None)
+        result = _format_file_entry(f)
+        assert "## File: big.py" in result
+        assert "_(full file content omitted — review diff only)_" in result
 
 
 class TestExtractPath:
@@ -268,7 +275,8 @@ class TestGroupFilesByTokenBudget:
         assert skipped == ["huge.py"]
 
     def test_deleted_file_included(self):
-        files = [FileReviewData(path="removed.py", diff="-old code\n", content=None)]
+        diff = "--- a/removed.py\n+++ /dev/null\n-old code\n"
+        files = [FileReviewData(path="removed.py", diff=diff, content=None)]
         template = "Review:\n{files}"
         groups, skipped = _group_files_by_token_budget(files, 80000, template)
         assert len(groups) == 1
@@ -400,7 +408,7 @@ class TestReviewFileGroup413Retry:
             call_count += 1
             # First call (all 4 files) → 413
             if call_count == 1:
-                response = httpx.Response(413, request=httpx.Request("POST", "https://x"))
+                response = httpx.Response(413, request=httpx.Request("POST", "https://x"), text="too large")
                 raise httpx.HTTPStatusError("too large", request=response.request, response=response)
             # Subsequent calls succeed
             files_in_prompt = prompt.count("## File:")
@@ -426,14 +434,42 @@ class TestReviewFileGroup413Retry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_single_file_skipped(self, copilot_config, review_config):
-        """A single file that triggers 413 is skipped gracefully."""
+    async def test_413_single_file_retries_diff_only(self, copilot_config, review_config):
+        """A single file with content that triggers 413 retries with diff only."""
         client = CopilotClient(copilot_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
+        call_count = 0
 
         async def mock_call_api(prompt: str):
-            response = httpx.Response(413, request=httpx.Request("POST", "https://x"))
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call (with content) → 413
+                response = httpx.Response(413, request=httpx.Request("POST", "https://x"), text="too large")
+                raise httpx.HTTPStatusError("too large", request=response.request, response=response)
+            # Second call (diff only) → success
+            return [], 0, 0
+
+        client._call_api = mock_call_api
+        try:
+            template = client.prompt_template
+            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
+            assert findings == []
+            assert skipped == []
+            assert call_count == 2
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_413_single_file_skipped_when_already_diff_only(self, copilot_config, review_config):
+        """A single file already without content that triggers 413 is skipped."""
+        client = CopilotClient(copilot_config, review_config)
+
+        files = [FileReviewData(path="huge.py", diff="+x\n", content=None)]
+
+        async def mock_call_api(prompt: str):
+            response = httpx.Response(413, request=httpx.Request("POST", "https://x"), text="too large")
             raise httpx.HTTPStatusError("too large", request=response.request, response=response)
 
         client._call_api = mock_call_api
@@ -443,6 +479,26 @@ class TestReviewFileGroup413Retry:
             assert findings == []
             assert pt == 0
             assert ct == 0
+            assert skipped == ["huge.py"]
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_413_single_file_falls_through_when_diff_only_also_fails(self, copilot_config, review_config):
+        """A single file that 413s with content and again with diff-only is skipped."""
+        client = CopilotClient(copilot_config, review_config)
+
+        files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
+
+        async def mock_call_api(prompt: str):
+            response = httpx.Response(413, request=httpx.Request("POST", "https://x"), text="too large")
+            raise httpx.HTTPStatusError("too large", request=response.request, response=response)
+
+        client._call_api = mock_call_api
+        try:
+            template = client.prompt_template
+            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
+            assert findings == []
             assert skipped == ["huge.py"]
         finally:
             await client.close()
@@ -458,7 +514,7 @@ class TestReviewFileGroup413Retry:
         ]
 
         async def mock_call_api(prompt: str):
-            response = httpx.Response(413, request=httpx.Request("POST", "https://x"))
+            response = httpx.Response(413, request=httpx.Request("POST", "https://x"), text="too large")
             raise httpx.HTTPStatusError("too large", request=response.request, response=response)
 
         client._call_api = mock_call_api
