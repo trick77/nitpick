@@ -384,6 +384,55 @@ class TestCopilotClient:
             await client.close()
 
 
+class TestRepoInstructionsInReviewPrompt:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_repo_instructions_replaced_in_review_prompt(self, copilot_config, review_config):
+        """Verify {repo_instructions} placeholder is replaced, not left as literal text."""
+        review_response = {
+            "choices": [{"message": {"content": "[]"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        route = respx.post("https://models.github.ai/inference/chat/completions").mock(
+            return_value=httpx.Response(200, json=review_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(files, repo_instructions="Use 4-space indent")
+
+            sent_body = json.loads(route.calls[0].request.content)
+            prompt = sent_body["messages"][1]["content"]
+            assert "{repo_instructions}" not in prompt
+            assert "Use 4-space indent" in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_empty_repo_instructions_clears_placeholder(self, copilot_config, review_config):
+        """When no repo instructions, placeholder is replaced with empty string."""
+        review_response = {
+            "choices": [{"message": {"content": "[]"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        route = respx.post("https://models.github.ai/inference/chat/completions").mock(
+            return_value=httpx.Response(200, json=review_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(files, repo_instructions="")
+
+            sent_body = json.loads(route.calls[0].request.content)
+            prompt = sent_body["messages"][1]["content"]
+            assert "{repo_instructions}" not in prompt
+        finally:
+            await client.close()
+
+
 class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_413_bisects_and_retries(self, copilot_config, review_config):

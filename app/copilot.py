@@ -291,13 +291,7 @@ class CopilotClient:
     ) -> "CopilotClient.ReviewResult":
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.prompt_template.replace("{tone}", tone_text)
-        if repo_instructions:
-            template = template.replace(
-                "{files}",
-                "Repository-specific review instructions (AGENTS.md):\n"
-                + repo_instructions
-                + "\n\n{files}",
-            )
+        template = template.replace("{repo_instructions}", repo_instructions)
 
         groups, skipped_files = _group_files_by_token_budget(
             files,
