@@ -135,7 +135,7 @@ def _format_file_entry(file_data: FileReviewData) -> str:
         parts.append(f"### Full file content (new version):\n```{lang}\n{file_data.content}\n```")
     else:
         parts.append("_(file deleted)_")
-    parts.append(f"### Changes (diff):\n```diff\n{file_data.diff}\n```")
+    parts.append(f"### Changes (diff: lines with `-` are REMOVED, lines with `+` are ADDED):\n```diff\n{file_data.diff}\n```")
     return "\n".join(parts)
 
 

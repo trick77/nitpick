@@ -156,7 +156,7 @@ class TestFormatFileEntry:
         assert "### Full file content (new version):" in result
         assert "```py" in result
         assert "hello\nworld\n" in result
-        assert "### Changes (diff):" in result
+        assert "### Changes (diff: lines with `-` are REMOVED, lines with `+` are ADDED):" in result
         assert "```diff" in result
 
     def test_deleted_file(self):
@@ -164,7 +164,7 @@ class TestFormatFileEntry:
         result = _format_file_entry(f)
         assert "## File: old.py" in result
         assert "_(file deleted)_" in result
-        assert "### Changes (diff):" in result
+        assert "### Changes (diff: lines with `-` are REMOVED, lines with `+` are ADDED):" in result
 
 
 class TestExtractPath:
