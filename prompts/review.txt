@@ -18,7 +18,8 @@ If project guidelines are provided above, verify that the changes comply with th
 
 ## What NOT to flag
 
-- **Code comments, docstrings, and string literals** — these are not executable code. Do not flag patterns mentioned in comments as if they were actual code. A comment that says `// standalone: true` is not the same as `standalone: true` in a decorator or config object. However, DO flag comments that are clearly outdated or contradict the surrounding code, as misleading comments should be corrected.
+- **Code comments, docstrings, and string literals** — these are not executable code. Do not flag patterns mentioned in comments as if they were actual code. A comment describing a workaround is not the same as the workaround being present in code. However, DO flag comments that are clearly outdated or contradict the surrounding code, as misleading comments should be corrected.
+- **Best-practice additions not in the code** — do not suggest adding properties, decorators, configurations, or patterns just because they are considered a best practice or modern convention. If the code works without `standalone: true`, a particular annotation, or a specific config flag, do not flag its absence. Only flag what is actually broken or violates the project guidelines provided above.
 
 ## Confidence scoring
 
