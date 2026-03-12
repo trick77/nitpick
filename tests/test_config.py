@@ -1,6 +1,6 @@
 import logging
 
-from app.config import AppConfig, BitbucketConfig, CopilotConfig, ReviewConfig, ServerConfig, log_config
+from app.config import AppConfig, BitbucketConfig, CopilotConfig, ReviewConfig, ServerConfig, load_config, log_config
 
 
 def _make_config():
@@ -55,3 +55,21 @@ def test_log_config_masks_secrets(caplog):
     assert "[config.copilot]" in text
     assert "[config.review]" in text
     assert "[config.server]" in text
+
+
+def test_optimize_diff_tokens_default():
+    assert ReviewConfig().optimize_diff_tokens is True
+
+
+def test_optimize_diff_tokens_from_env(monkeypatch):
+    env = {
+        "BITBUCKET_URL": "https://bb.example.com",
+        "BITBUCKET_TOKEN": "tok",
+        "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "GITHUB_TOKEN": "ghp_tok",
+        "REVIEW_OPTIMIZE_DIFF_TOKENS": "false",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    config = load_config()
+    assert config.review.optimize_diff_tokens is False

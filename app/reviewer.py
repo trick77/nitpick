@@ -36,6 +36,7 @@ class Reviewer:
         context_lines: int = 0,
         mention_trigger: str = "noergler",
         ramsay_authors: list[str] | None = None,
+        optimize_diff_tokens: bool = True,
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
@@ -45,6 +46,7 @@ class Reviewer:
         self.context_lines = context_lines
         self.mention_trigger = mention_trigger
         self.ramsay_authors = ramsay_authors or []
+        self.optimize_diff_tokens = optimize_diff_tokens
 
     def _tone_for_author(self, author: str) -> str:
         return "ramsay" if author in self.ramsay_authors else "default"
@@ -96,7 +98,7 @@ class Reviewer:
                 skipped_large.append(path)
                 return None
             diff_lines = file_diff.count("\n") + 1
-            if content and diff_lines >= line_count:
+            if self.optimize_diff_tokens and content and diff_lines >= line_count:
                 content = None
             if content:
                 logger.info("Including %s with full file content (%d lines)", path, line_count)

@@ -303,6 +303,23 @@ class TestReviewer:
         assert "No issues found" in summary_text
 
     @pytest.mark.asyncio
+    async def test_optimize_diff_tokens_false_preserves_content(self, mock_bitbucket, mock_copilot):
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value="hello\n")
+        rev = Reviewer(
+            mock_bitbucket, mock_copilot,
+            auto_review_authors=["jan.username"],
+            optimize_diff_tokens=False,
+        )
+        payload = _make_payload("jan.username")
+        await rev.review_pull_request(payload)
+
+        mock_copilot.review_diff.assert_called_once()
+        files = mock_copilot.review_diff.call_args[0][0]
+        assert len(files) == 1
+        # Content preserved even though diff (2 lines) >= file (1 line)
+        assert files[0].content == "hello\n"
+
+    @pytest.mark.asyncio
     async def test_content_fetch_failure_falls_back_to_diff_only(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
         rev = Reviewer(mock_bitbucket, mock_copilot, auto_review_authors=["jan.username"])

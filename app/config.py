@@ -26,6 +26,7 @@ class ReviewConfig(BaseModel):
     ramsay_authors: list[str] = []
     mention_trigger: str = "noergler"
     mention_prompt_template: str = "prompts/mention.txt"
+    optimize_diff_tokens: bool = True
 
     @field_validator("auto_review_authors", "ramsay_authors", mode="before")
     @classmethod
@@ -93,6 +94,7 @@ def load_config() -> AppConfig:
             ramsay_authors=_env("REVIEW_RAMSAY_AUTHORS", ""),
             mention_trigger=_env("REVIEW_MENTION_TRIGGER", "noergler"),
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
+            optimize_diff_tokens=_env("REVIEW_OPTIMIZE_DIFF_TOKENS", "true").lower() in ("true", "1", "yes"),
         ),
         server=ServerConfig(
             host=_env("SERVER_HOST", "0.0.0.0"),
