@@ -231,7 +231,7 @@ def _make_review_result(findings=None, skipped_files=None):
 @pytest.fixture
 def mock_copilot():
     client = AsyncMock()
-    client.config.model = "openai/gpt-5.2"
+    client.config.model = "openai/gpt-5"
     client.review_diff = AsyncMock(return_value=_make_review_result([
         ReviewFinding(file="file.py", line=1, severity="warning", comment="Test issue"),
     ]))
@@ -396,7 +396,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="b.py", line=20, severity="warning", comment="style"),
         ]
         existing = [
-            {"text": f"❌ **Critical:** bug\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
+            {"text": f"**Suggestion:** bug\n\n**Severity Level:** Critical ❌\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
         ]
         result = _deduplicate(findings, existing)
         assert len(result) == 1
@@ -407,7 +407,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="a.py", line=10, severity="critical", comment="bug"),
         ]
         existing = [
-            {"text": "❌ **Critical:** bug", "path": "a.py", "line": 10},
+            {"text": "**Severity Level:** Critical ❌", "path": "a.py", "line": 10},
         ]
         result = _deduplicate(findings, existing)
         assert len(result) == 1
@@ -417,7 +417,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="a.py", line=10, severity="warning", comment="style"),
         ]
         existing = [
-            {"text": f"❌ **Critical:** bug\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
+            {"text": f"**Suggestion:** bug\n\n**Severity Level:** Critical ❌\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
         ]
         result = _deduplicate(findings, existing)
         assert len(result) == 1
@@ -481,7 +481,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, token_usage=(1000, 500))
-        assert "Model: `openai/gpt-5.2`" in summary
+        assert "Model: `openai/gpt-5`" in summary
         assert "tokens used: 1,500" in summary
         assert "1,000 prompt" in summary
         assert "500 completion" in summary

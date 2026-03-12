@@ -17,7 +17,7 @@ from app.models import PullRequest, ReviewFinding, WebhookPayload
 logger = logging.getLogger(__name__)
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1}
-_SEVERITY_RE = re.compile(r"\*\*(\w+):\*\*")
+_SEVERITY_RE = re.compile(r"\*\*Severity Level:\*\*\s*(\w+)")
 _REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
 
 

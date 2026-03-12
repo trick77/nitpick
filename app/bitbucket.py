@@ -60,8 +60,16 @@ class BitbucketClient:
     ) -> None:
         url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments"
         path = re.sub(r"^[ab]/", "", finding.file)
+        parts = [
+            f"**Suggestion:** {finding.comment}",
+            f"**Severity Level:** {finding.severity.capitalize()} {SEVERITY_EMOJI.get(finding.severity, '❓')}",
+        ]
+        if finding.suggestion:
+            parts.append(f"**Suggested change:**\n```\n{finding.suggestion}\n```")
+        parts.append(NOERGLER_MARKER)
+        text = "\n\n".join(parts)
         payload = {
-            "text": f"{SEVERITY_EMOJI.get(finding.severity, '❓')} **{finding.severity.capitalize()}:** {finding.comment}\n\n{NOERGLER_MARKER}",
+            "text": text,
             "anchor": {
                 "path": path,
                 "line": finding.line,
