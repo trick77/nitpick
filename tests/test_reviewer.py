@@ -503,6 +503,29 @@ class TestDedupAndLimit:
         assert "1,000 prompt" in summary
         assert "500 completion" in summary
 
+    def test_build_summary_prompt_breakdown(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        breakdown = {"template": 500, "repo_instructions": 200, "files": 7258}
+        summary = reviewer._build_summary(
+            findings,
+            token_usage=(7958, 6764),
+            prompt_breakdown=breakdown,
+        )
+        assert "prompt est.:" in summary
+        assert "~500 template" in summary
+        assert "~200 repo instructions" in summary
+        assert "~7,258 review files" in summary
+
+    def test_build_summary_prompt_breakdown_without_token_usage(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        breakdown = {"template": 500, "repo_instructions": 0, "files": 7258}
+        summary = reviewer._build_summary(findings, prompt_breakdown=breakdown)
+        assert "prompt est.:" not in summary
+
     @pytest.mark.asyncio
     async def test_findings_limited_in_review(self, mock_bitbucket, mock_copilot):
         mock_copilot.review_diff.return_value = _make_review_result([

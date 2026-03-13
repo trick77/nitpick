@@ -207,6 +207,7 @@ class Reviewer:
                 agents_md_found=agents_md_found,
                 skipped_files=skipped_large + result.skipped_files,
                 token_usage=(result.prompt_tokens, result.completion_tokens),
+                prompt_breakdown=result.prompt_breakdown,
             )
             try:
                 await self.bitbucket.post_pr_comment(
@@ -334,6 +335,7 @@ class Reviewer:
         agents_md_found: bool = False,
         skipped_files: list[str] | None = None,
         token_usage: tuple[int, int] | None = None,
+        prompt_breakdown: dict[str, int] | None = None,
     ) -> str:
         if not findings:
             summary = "**Noergler review summary:** No issues found. ✅"
@@ -371,6 +373,12 @@ class Reviewer:
             prompt_t, completion_t = token_usage
             model = self.copilot.config.model
             summary += f"\n\n_Model: `{model}` — tokens used: {prompt_t + completion_t:,} ({prompt_t:,} prompt + {completion_t:,} completion)_"
+            if prompt_breakdown:
+                summary += (
+                    f"\n_↳ prompt est.: ~{prompt_breakdown['template']:,} template"
+                    f", ~{prompt_breakdown['repo_instructions']:,} repo instructions"
+                    f", ~{prompt_breakdown['files']:,} review files_"
+                )
 
         return summary
 

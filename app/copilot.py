@@ -321,6 +321,7 @@ class CopilotClient:
         skipped_files: list[str]
         prompt_tokens: int
         completion_tokens: int
+        prompt_breakdown: dict[str, int] | None = None
 
     async def review_diff(
         self, files: list[FileReviewData], repo_instructions: str = "", tone: str = "default"
@@ -328,6 +329,17 @@ class CopilotClient:
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.prompt_template.replace("{tone}", tone_text)
         template = template.replace("{repo_instructions}", repo_instructions)
+
+        prompt_breakdown = {
+            "template": _count_tokens(
+                self.prompt_template
+                .replace("{files}", "")
+                .replace("{repo_instructions}", "")
+                .replace("{tone}", "")
+            ),
+            "repo_instructions": _count_tokens(repo_instructions) if repo_instructions else 0,
+            "files": sum(_count_tokens(_format_file_entry(f)) for f in files),
+        }
 
         groups, skipped_files = _group_files_by_token_budget(
             files,
@@ -365,6 +377,7 @@ class CopilotClient:
             skipped_files=skipped_files,
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_completion_tokens,
+            prompt_breakdown=prompt_breakdown,
         )
 
     async def answer_question(
