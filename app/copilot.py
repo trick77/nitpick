@@ -259,21 +259,30 @@ class CopilotClient:
 
     async def _post_with_retry(self, url: str, **kwargs) -> httpx.Response:
         max_retries = 3
-        wait = 60.0
+        default_wait = 60.0
         for attempt in range(max_retries + 1):
             response = await self.client.post(url, **kwargs)
             if response.status_code != 429:
                 return response
 
+            retry_after = response.headers.get("retry-after")
+            rate_limit_type = response.headers.get("x-ratelimit-type", "unknown")
+            time_remaining = response.headers.get("x-ratelimit-timeremaining", "unknown")
+
             if attempt == 0:
                 logger.warning(
-                    "429 rate-limited — response headers: %s, body: %s",
-                    dict(response.headers),
+                    "429 rate-limited — type: %s, retry-after: %s, time-remaining: %ss, body: %s",
+                    rate_limit_type, retry_after, time_remaining,
                     response.text[:500],
                 )
 
             if attempt >= max_retries:
                 return response
+
+            try:
+                wait = float(retry_after) if retry_after else default_wait
+            except (ValueError, TypeError):
+                wait = default_wait
 
             logger.warning(
                 "429 retry %d/%d — waiting %.0fs before next attempt",
