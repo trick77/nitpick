@@ -23,7 +23,7 @@ from app.copilot import (
 @pytest.fixture
 def copilot_config():
     return CopilotConfig(
-        model="openai/gpt-4",
+        model="openai/gpt-4.1",
         github_token="test-token",
         api_url="https://models.github.ai/inference/chat/completions",
         max_tokens_per_chunk=80000,
@@ -351,8 +351,18 @@ class TestCopilotClient:
     async def test_validate_model_found(self, copilot_config, review_config):
         models_response = {
             "data": [
-                {"id": "openai/gpt-4", "max_prompt_tokens": 128000},
-                {"id": "openai/gpt-4-mini", "max_prompt_tokens": 64000},
+                {
+                    "id": "openai/gpt-4.1",
+                    "limits": {"max_input_tokens": 1048576, "max_output_tokens": 32768},
+                    "rate_limit_tier": "high",
+                    "capabilities": ["streaming", "tool-calling"],
+                },
+                {
+                    "id": "openai/gpt-4.1-mini",
+                    "limits": {"max_input_tokens": 1048576, "max_output_tokens": 32768},
+                    "rate_limit_tier": "high",
+                    "capabilities": ["streaming"],
+                },
             ]
         }
 
@@ -364,7 +374,7 @@ class TestCopilotClient:
         try:
             result = await client.validate_model()
             assert result is not None
-            assert result["id"] == "openai/gpt-4"
+            assert result["id"] == "openai/gpt-4.1"
         finally:
             await client.close()
 

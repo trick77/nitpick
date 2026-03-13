@@ -318,14 +318,39 @@ class CopilotClient:
             response.raise_for_status()
             models_data = response.json()
             model_list = models_data.get("data", models_data) if isinstance(models_data, dict) else models_data
+
+            # Log all available models
+            lines = ["Available models:"]
+            matched = None
             for model in model_list:
-                if isinstance(model, dict) and model.get("id") == self.config.model:
-                    logger.info(
-                        "Model %s validated. max_prompt_tokens=%s",
-                        self.config.model,
-                        model.get("max_prompt_tokens", "unknown"),
-                    )
-                    return model
+                if not isinstance(model, dict):
+                    continue
+                mid = model.get("id", "?")
+                limits = model.get("limits", {})
+                max_in = limits.get("max_input_tokens", model.get("max_input_tokens", "?"))
+                max_out = limits.get("max_output_tokens", model.get("max_output_tokens", "?"))
+                tier = model.get("rate_limit_tier", "?")
+                caps = ",".join(model.get("capabilities", [])) or "?"
+                max_in_fmt = f"{max_in:,}" if isinstance(max_in, int) else str(max_in)
+                max_out_fmt = f"{max_out:,}" if isinstance(max_out, int) else str(max_out)
+                lines.append(
+                    f"  {mid:<35s} max_in={max_in_fmt:<12s} max_out={max_out_fmt:<10s} tier={tier}  capabilities={caps}"
+                )
+                if mid == self.config.model:
+                    matched = model
+            logger.info("\n".join(lines))
+
+            if matched:
+                limits = matched.get("limits", {})
+                max_in = limits.get("max_input_tokens", matched.get("max_input_tokens", "unknown"))
+                max_out = limits.get("max_output_tokens", matched.get("max_output_tokens", "unknown"))
+                max_in_fmt = f"{max_in:,}" if isinstance(max_in, int) else str(max_in)
+                max_out_fmt = f"{max_out:,}" if isinstance(max_out, int) else str(max_out)
+                logger.info(
+                    "Model %s validated. max_input_tokens=%s, max_output_tokens=%s",
+                    self.config.model, max_in_fmt, max_out_fmt,
+                )
+                return matched
             logger.warning(
                 "Model %s not found in available models", self.config.model
             )

@@ -240,7 +240,7 @@ def _make_review_result(findings=None, skipped_files=None, review_effort=1):
 @pytest.fixture
 def mock_copilot():
     client = AsyncMock()
-    client.config.model = "openai/gpt-4"
+    client.config.model = "openai/gpt-4.1"
     client.config.max_tokens_per_chunk = 80000
     client.prompt_template = "Review these files:\n{files}\n{tone}\n{repo_instructions}"
     client.review_diff = AsyncMock(return_value=_make_review_result([
@@ -508,7 +508,7 @@ class TestDedupAndLimit:
             ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, token_usage=(1000, 500))
-        assert "Model: `openai/gpt-4`" in summary
+        assert "Model: `openai/gpt-4.1`" in summary
         assert "tokens used: 1,500" in summary
         assert "1,000 prompt" in summary
         assert "500 completion" in summary
