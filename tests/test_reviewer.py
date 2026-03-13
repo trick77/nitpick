@@ -567,7 +567,7 @@ class TestDedupAndLimit:
             {
                 "id": 77,
                 "version": 2,
-                "text": f"**Review summary:** old\n\n{NOERGLER_MARKER}",
+                "text": f"🤖 **Review summary:** old\n\n{NOERGLER_MARKER}",
                 "path": None,
                 "line": None,
             },

@@ -396,7 +396,7 @@ class Reviewer:
         review_effort: int | None = None,
     ) -> str:
         if not findings:
-            summary = "**Review summary:** No issues found. ✅"
+            summary = "🤖 **Review summary:** No issues found. ✅"
         else:
             counts = {"critical": 0, "warning": 0}
             for f in findings:
@@ -408,7 +408,7 @@ class Reviewer:
             if counts["warning"]:
                 parts.append(f"⚠️ {self._plural(counts['warning'], 'warning')}")
 
-            summary = f"**Review summary:** {self._plural(len(findings), 'issue')} found — {', '.join(parts)}"
+            summary = f"🤖 **Review summary:** {self._plural(len(findings), 'issue')} found — {', '.join(parts)}"
 
             security_findings = [f for f in findings if _SECURITY_KEYWORDS.search(f.comment)]
             if security_findings:
@@ -426,7 +426,7 @@ class Reviewer:
             summary += f"\n\n⚠️ Not reviewed (too large): {file_list}"
 
         if agents_md_found:
-            summary += "\n\n✅ Using project-specific review guidelines from `AGENTS.md`."
+            summary += "\n\n✅ Using project-specific review guidelines from `AGENTS.md`"
         else:
             summary += "\n\n💡 Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback."
 
