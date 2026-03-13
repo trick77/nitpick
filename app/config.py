@@ -37,6 +37,15 @@ class ReviewConfig(BaseModel):
         return v
 
 
+class JiraConfig(BaseModel):
+    base_url: str = ""
+    token: str = ""
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.base_url and self.token)
+
+
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -46,6 +55,7 @@ class AppConfig(BaseModel):
     bitbucket: BitbucketConfig
     copilot: CopilotConfig
     review: ReviewConfig = ReviewConfig()
+    jira: JiraConfig = JiraConfig()
     server: ServerConfig = ServerConfig()
 
 
@@ -59,11 +69,12 @@ def _env(name: str, default: str | None = None) -> str:
 _SECRET_FIELDS = {
     "bitbucket": {"token", "webhook_secret"},
     "copilot": {"github_token"},
+    "jira": {"token"},
 }
 
 
 def log_config(config: AppConfig, log: logging.Logger) -> None:
-    for section_name in ("bitbucket", "copilot", "review", "server"):
+    for section_name in ("bitbucket", "copilot", "review", "jira", "server"):
         section = getattr(config, section_name)
         secrets = _SECRET_FIELDS.get(section_name, set())
         log.info("[config.%s]", section_name)
@@ -97,6 +108,10 @@ def load_config() -> AppConfig:
             ramsay_authors=_env("REVIEW_RAMSAY_AUTHORS", ""),
             mention_trigger=_env("REVIEW_MENTION_TRIGGER", "noergler"),
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
+        ),
+        jira=JiraConfig(
+            base_url=_env("JIRA_BASE_URL", ""),
+            token=_env("JIRA_TOKEN", ""),
         ),
         server=ServerConfig(
             host=_env("SERVER_HOST", "0.0.0.0"),

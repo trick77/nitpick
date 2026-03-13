@@ -5,6 +5,7 @@ import pytest
 from app.bitbucket import NOERGLER_MARKER
 from app.config import ReviewConfig
 from app.copilot import CopilotClient, FileReviewData
+from app.jira import JiraClient, JiraTicket
 from app.models import ReviewFinding, WebhookPayload
 from app.reviewer import Reviewer, _deduplicate, _sort_and_limit
 
@@ -15,15 +16,19 @@ def _review_config(**overrides) -> ReviewConfig:
     return ReviewConfig(**defaults)
 
 
-def _make_payload(author: str = "username") -> WebhookPayload:
+def _make_payload(
+    author: str = "username",
+    branch: str = "feature",
+    title: str = "Test PR",
+) -> WebhookPayload:
     return WebhookPayload(**{
         "eventKey": "pr:opened",
         "pullRequest": {
             "id": 42,
-            "title": "Test PR",
+            "title": title,
             "fromRef": {
-                "id": "refs/heads/feature",
-                "displayId": "feature",
+                "id": f"refs/heads/{branch}",
+                "displayId": branch,
                 "latestCommit": "abc123",
                 "repository": {"slug": "my-repo", "project": {"key": "PROJ"}},
             },
@@ -701,3 +706,131 @@ class TestHandleMention:
         # Should trigger review_diff, not answer_question
         mock_copilot.review_diff.assert_called_once()
         mock_copilot.answer_question.assert_not_called()
+
+
+class TestTicketExtraction:
+    def test_extract_ticket_id_from_branch(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        payload = _make_payload(branch="feature/SEP-22888-description")
+        assert rev._extract_ticket_id(payload.pullRequest) == "SEP-22888"
+
+    def test_extract_ticket_id_from_branch_slash(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        payload = _make_payload(branch="SEP-22888/description")
+        assert rev._extract_ticket_id(payload.pullRequest) == "SEP-22888"
+
+    def test_extract_ticket_id_from_title(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        payload = _make_payload(branch="feature/no-ticket", title="SEP-22888 Fix login")
+        assert rev._extract_ticket_id(payload.pullRequest) == "SEP-22888"
+
+    def test_extract_ticket_id_none(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        payload = _make_payload(branch="feature/no-ticket", title="Fix login bug")
+        assert rev._extract_ticket_id(payload.pullRequest) is None
+
+    def test_extract_ticket_id_branch_priority(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        payload = _make_payload(branch="feature/SEP-111-fix", title="SEP-222 other fix")
+        assert rev._extract_ticket_id(payload.pullRequest) == "SEP-111"
+
+
+class TestBuildSummaryWithTicket:
+    @pytest.fixture
+    def reviewer(self, mock_bitbucket, mock_copilot):
+        return Reviewer(mock_bitbucket, mock_copilot, _review_config())
+
+    def test_build_summary_with_ticket(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-22888",
+            title="Config security",
+            description=None,
+            labels=[],
+            acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-22888",
+        )
+        summary = reviewer._build_summary([], ticket=ticket)
+        assert "SEP-22888" in summary
+        assert "https://jira.example.com/browse/SEP-22888" in summary
+        assert "🎫" in summary
+
+    def test_build_summary_with_ticket_compliance_full(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, ticket_compliance="Fully compliant"
+        )
+        assert "✅ Ticket compliance: **Fully compliant**" in summary
+
+    def test_build_summary_with_ticket_compliance_partial(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, ticket_compliance="Partially compliant"
+        )
+        assert "⚠️ Ticket compliance: **Partially compliant**" in summary
+
+    def test_build_summary_with_ticket_compliance_not(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, ticket_compliance="Not compliant"
+        )
+        assert "❌ Ticket compliance: **Not compliant**" in summary
+
+    def test_build_summary_no_ticket(self, reviewer):
+        summary = reviewer._build_summary([])
+        assert "🎫" not in summary
+        assert "compliance" not in summary.lower()
+
+
+class TestReviewWithJira:
+    @pytest.mark.asyncio
+    async def test_review_with_jira_context(self, mock_bitbucket, mock_copilot):
+        mock_jira = AsyncMock()
+        mock_jira.fetch_ticket = AsyncMock(return_value=JiraTicket(
+            key="SEP-123",
+            title="Add login",
+            description="Implement login page",
+            labels=["frontend"],
+            acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-123",
+        ))
+        mock_copilot.review_diff.return_value = _make_review_result(
+            findings=[
+                ReviewFinding(file="file.py", line=1, severity="warning", comment="Test issue"),
+            ],
+        )
+        mock_copilot.review_diff.return_value.ticket_compliance = "Fully compliant"
+
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        payload = _make_payload(branch="feature/SEP-123-login")
+        await rev.review_pull_request(payload)
+
+        mock_jira.fetch_ticket.assert_called_once_with("SEP-123")
+        call_kwargs = mock_copilot.review_diff.call_args[1]
+        assert "SEP-123" in call_kwargs["ticket_context"]
+        assert "Add login" in call_kwargs["ticket_context"]
+
+        summary_text = mock_bitbucket.update_pr_comment.call_args[0][5] if mock_bitbucket.update_pr_comment.called else mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "SEP-123" in summary_text
+        assert "Fully compliant" in summary_text
+
+    @pytest.mark.asyncio
+    async def test_review_jira_disabled(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        payload = _make_payload(branch="feature/SEP-123-login")
+        await rev.review_pull_request(payload)
+
+        mock_copilot.review_diff.assert_called_once()
+        call_kwargs = mock_copilot.review_diff.call_args[1]
+        assert call_kwargs["ticket_context"] == ""

@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from app.bitbucket import BitbucketClient
 from app.config import load_config, log_config
 from app.copilot import CopilotClient
+from app.jira import JiraClient
 from app.models import WebhookPayload
 from app.reviewer import Reviewer
 
@@ -30,17 +31,24 @@ config = None
 reviewer = None
 bitbucket_client = None
 copilot_client = None
+jira_client = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global config, reviewer, bitbucket_client, copilot_client
+    global config, reviewer, bitbucket_client, copilot_client, jira_client
 
     config = load_config()
     log_config(config, logger)
     bitbucket_client = BitbucketClient(config.bitbucket)
     copilot_client = CopilotClient(config.copilot, config.review)
-    reviewer = Reviewer(bitbucket_client, copilot_client, config.review)
+
+    jira_client = None
+    if config.jira.enabled:
+        jira_client = JiraClient(config.jira)
+        logger.info("Jira integration enabled (%s)", config.jira.base_url)
+
+    reviewer = Reviewer(bitbucket_client, copilot_client, config.review, jira=jira_client)
 
     await copilot_client.validate_model()
     logger.info("Bridge service started, model=%s", config.copilot.model)
@@ -49,6 +57,8 @@ async def lifespan(app: FastAPI):
 
     await bitbucket_client.close()
     await copilot_client.close()
+    if jira_client:
+        await jira_client.close()
 
 
 app = FastAPI(title="Bitbucket PR Review Bridge", lifespan=lifespan)

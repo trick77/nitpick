@@ -43,27 +43,30 @@ class TestParseReviewResponse:
         content = json.dumps([
             {"file": "src/main.py", "line": 10, "severity": "critical", "comment": "Bug here"}
         ])
-        findings = _parse_review_response(content)
+        findings, compliance = _parse_review_response(content)
         assert len(findings) == 1
         assert findings[0].file == "src/main.py"
         assert findings[0].line == 10
         assert findings[0].severity == "critical"
+        assert compliance is None
 
     def test_empty_array(self):
-        findings = _parse_review_response("[]")
+        findings, compliance = _parse_review_response("[]")
         assert findings == []
+        assert compliance is None
 
     def test_wrapped_in_code_fence(self):
         content = "```json\n[{\"file\": \"a.py\", \"line\": 1, \"severity\": \"warning\", \"comment\": \"test\"}]\n```"
-        findings = _parse_review_response(content)
+        findings, compliance = _parse_review_response(content)
         assert len(findings) == 1
 
     def test_invalid_json(self):
-        findings = _parse_review_response("not json at all")
+        findings, compliance = _parse_review_response("not json at all")
         assert findings == []
+        assert compliance is None
 
     def test_not_an_array(self):
-        findings = _parse_review_response('{"file": "a.py"}')
+        findings, compliance = _parse_review_response('{"file": "a.py"}')
         assert findings == []
 
     def test_malformed_item_skipped(self):
@@ -71,8 +74,28 @@ class TestParseReviewResponse:
             {"file": "a.py", "line": 1, "severity": "critical", "comment": "good"},
             {"bad": "item"},
         ])
-        findings = _parse_review_response(content)
+        findings, compliance = _parse_review_response(content)
         assert len(findings) == 1
+
+    def test_object_with_findings_and_compliance(self):
+        content = json.dumps({
+            "findings": [
+                {"file": "a.py", "line": 1, "severity": "warning", "comment": "test"}
+            ],
+            "ticket_compliance": "Fully compliant",
+        })
+        findings, compliance = _parse_review_response(content)
+        assert len(findings) == 1
+        assert compliance == "Fully compliant"
+
+    def test_object_with_invalid_compliance(self):
+        content = json.dumps({
+            "findings": [],
+            "ticket_compliance": "invalid value",
+        })
+        findings, compliance = _parse_review_response(content)
+        assert findings == []
+        assert compliance is None
 
 
 class TestIsReviewableDiff:
@@ -567,13 +590,13 @@ class TestReviewFileGroup413Retry:
                 findings.append(finding_d)
             return (
                 [__import__("app.models", fromlist=["ReviewFinding"]).ReviewFinding(**f) for f in findings],
-                50, 25,
+                50, 25, None,
             )
 
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance = await client._review_file_group(files, template, depth=0)
             assert len(findings) == 2
             assert {f.file for f in findings} == {"a.py", "d.py"}
             assert skipped == []
@@ -597,12 +620,12 @@ class TestReviewFileGroup413Retry:
                 response = httpx.Response(413, request=httpx.Request("POST", "https://x"), text="too large")
                 raise httpx.HTTPStatusError("too large", request=response.request, response=response)
             # Second call (diff only) → success
-            return [], 0, 0
+            return [], 0, 0, None
 
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert skipped == []
             assert call_count == 2
@@ -623,7 +646,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert pt == 0
             assert ct == 0
@@ -645,7 +668,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert skipped == ["huge.py"]
         finally:
@@ -668,7 +691,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped = await client._review_file_group(files, template, depth=3)
+            findings, pt, ct, skipped, _compliance = await client._review_file_group(files, template, depth=3)
             assert findings == []
             assert set(skipped) == {"a.py", "b.py"}
         finally:

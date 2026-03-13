@@ -17,6 +17,7 @@ from app.copilot import (
 from app.config import ReviewConfig
 from app.context_expansion import expand_all_files
 from app.diff_compression import compress_for_large_pr, is_small_pr
+from app.jira import JiraClient, JiraTicket
 from app.models import PullRequest, ReviewFinding, WebhookPayload
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ _EFFORT_LABELS = {
 }
 _SEVERITY_RE = re.compile(r"\*\*Severity Level:\*\*\s*(\w+)")
 _REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
+_JIRA_TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d{1,7})\b')
 _SECURITY_KEYWORDS = re.compile(
     r"\b(injection|xss|sql[_ -]?injection|authentication|authorization|"
     r"credentials?|secret[s ]?leak|csrf|ssrf|"
@@ -51,14 +53,46 @@ class Reviewer:
         bitbucket: BitbucketClient,
         copilot: CopilotClient,
         review_config: ReviewConfig,
+        jira: JiraClient | None = None,
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
         self.review_config = review_config
+        self.jira = jira
         self.auto_review_authors = review_config.auto_review_authors
         self.max_comments = review_config.max_comments
         self.mention_trigger = review_config.mention_trigger
         self.ramsay_authors = review_config.ramsay_authors
+
+    @staticmethod
+    def _extract_ticket_id(pr: PullRequest) -> str | None:
+        match = _JIRA_TICKET_RE.search(pr.fromRef.displayId)
+        if match:
+            return match.group(1)
+        match = _JIRA_TICKET_RE.search(pr.title)
+        if match:
+            return match.group(1)
+        return None
+
+    async def _fetch_ticket_context(self, ticket_id: str) -> tuple[str, JiraTicket | None]:
+        if not self.jira:
+            return "", None
+        ticket = await self.jira.fetch_ticket(ticket_id)
+        if not ticket:
+            return "", None
+        lines = [f"### Jira ticket: [{ticket.key}]({ticket.url})"]
+        lines.append(f"**Title:** {ticket.title}")
+        if ticket.description:
+            lines.append(f"**Description:** {ticket.description}")
+        if ticket.labels:
+            lines.append(f"**Labels:** {', '.join(ticket.labels)}")
+        if ticket.acceptance_criteria:
+            lines.append(f"**Acceptance criteria:** {ticket.acceptance_criteria}")
+        if ticket.subtasks:
+            lines.append("**Subtasks:**")
+            for st in ticket.subtasks:
+                lines.append(f"- {st}")
+        return "\n".join(lines), ticket
 
     def _tone_for_author(self, author: str) -> str:
         return "ramsay" if author in self.ramsay_authors else "default"
@@ -215,12 +249,21 @@ class Reviewer:
                 f.path == "AGENTS.md" for f in files
             )
 
+            ticket_id = self._extract_ticket_id(pr)
+            ticket_context = ""
+            ticket: JiraTicket | None = None
+            if ticket_id and self.jira:
+                ticket_context, ticket = await self._fetch_ticket_context(ticket_id)
+                if ticket:
+                    logger.info("%s: linked Jira ticket %s", pr_tag, ticket_id)
+
             tone = self._tone_for_author(author_name)
             result = await self.copilot.review_diff(
                 files, repo_instructions, tone=tone,
                 other_modified_paths=other_modified,
                 deleted_file_paths=deleted_paths,
                 renamed_file_paths=renamed_paths,
+                ticket_context=ticket_context,
             )
 
             existing = await self._fetch_existing_comments(project_key, repo_slug, pr_id)
@@ -252,6 +295,8 @@ class Reviewer:
                 token_usage=(result.prompt_tokens, result.completion_tokens),
                 prompt_breakdown=result.prompt_breakdown,
                 review_effort=result.review_effort,
+                ticket=ticket,
+                ticket_compliance=result.ticket_compliance,
             )
             try:
                 existing_summary = next(
@@ -394,6 +439,8 @@ class Reviewer:
         token_usage: tuple[int, int] | None = None,
         prompt_breakdown: dict[str, int] | None = None,
         review_effort: int | None = None,
+        ticket: JiraTicket | None = None,
+        ticket_compliance: str | None = None,
     ) -> str:
         if not findings:
             summary = "🤖 **Review summary:** No issues found. ✅"
@@ -416,6 +463,11 @@ class Reviewer:
                 summary += f"\n\nShowing top {len(findings)} findings by severity. Additional findings were omitted."
 
         meta = []
+        if ticket:
+            meta.append(f"🎫 Linked ticket: [{ticket.key}]({ticket.url})")
+            if ticket_compliance:
+                compliance_emoji = {"Fully compliant": "✅", "Partially compliant": "⚠️", "Not compliant": "❌"}.get(ticket_compliance, "")
+                meta.append(f"{compliance_emoji} Ticket compliance: **{ticket_compliance}**")
         if findings and security_findings:
             meta.append(f"🔒 **Security:** {self._plural(len(security_findings), 'potential security issue')} detected — review these findings carefully.")
         if review_effort is not None:
