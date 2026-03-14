@@ -10,6 +10,19 @@ Brings automated AI code review to on-premise Bitbucket Server installations. Re
 
 ![noergler inline review comment](review.png)
 
+## Features
+
+- Automatic AI-powered code review on PR open/modify
+- Mention-based interaction — ask questions or trigger re-reviews via `@noergler` in PR comments
+- Smart context enrichment — fetches full file content, not just diffs, for better AI understanding
+- Asymmetric and dynamic diff context expansion with language-aware scope detection
+- Token-aware chunking for large PRs
+- Jira ticket compliance checking against acceptance criteria
+- Project-specific review guidelines via `AGENTS.md`
+- Comment deduplication against existing review comments
+- HMAC-SHA256 webhook signature validation
+- Corporate CA certificate support
+
 ## How it works
 
 1. **Webhook** — Bitbucket Server fires a `pr:opened` or `pr:modified` event to the `/webhook` endpoint. The request is validated via HMAC-SHA256.
