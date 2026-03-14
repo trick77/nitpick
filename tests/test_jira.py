@@ -38,6 +38,41 @@ def _jira_response(
     return {"key": key, "fields": fields}
 
 
+class TestCheckConnectivity:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_connectivity_success(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/myself").mock(
+            return_value=httpx.Response(200, json={
+                "name": "jdoe",
+                "displayName": "John Doe",
+            })
+        )
+
+        result = await jira_client.check_connectivity()
+        assert result is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_connectivity_failure_401(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/myself").mock(
+            return_value=httpx.Response(401, text="Unauthorized")
+        )
+
+        result = await jira_client.check_connectivity()
+        assert result is False
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_check_connectivity_connection_error(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/myself").mock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
+
+        result = await jira_client.check_connectivity()
+        assert result is False
+
+
 class TestFetchTicket:
     @respx.mock
     @pytest.mark.asyncio

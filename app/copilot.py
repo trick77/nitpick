@@ -342,7 +342,7 @@ class CopilotClient:
 
         return response  # unreachable, but satisfies type checkers
 
-    async def validate_model(self) -> dict | None:
+    async def check_connectivity(self) -> dict | None:
         base_url = self.config.api_url.split("/inference")[0]
         models_url = base_url + "/catalog/models"
         try:

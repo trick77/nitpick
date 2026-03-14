@@ -29,6 +29,19 @@ class BitbucketClient:
     async def close(self):
         await self.client.aclose()
 
+    async def check_connectivity(self) -> None:
+        try:
+            response = await self.client.get("/rest/api/1.0/application-properties")
+            response.raise_for_status()
+            data = response.json()
+            logger.info(
+                "Bitbucket connectivity OK — %s v%s",
+                data.get("displayName", "?"),
+                data.get("version", "?"),
+            )
+        except Exception:
+            logger.warning("Bitbucket connectivity check failed", exc_info=True)
+
     async def fetch_pr_diff(
         self, project: str, repo: str, pr_id: int, context_lines: int = 0
     ) -> str:

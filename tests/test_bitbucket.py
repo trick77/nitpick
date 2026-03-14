@@ -26,6 +26,30 @@ def client(bb_config):
 class TestBitbucketClient:
     @pytest.mark.asyncio
     @respx.mock
+    async def test_check_connectivity_success(self, client):
+        respx.get(f"{BASE_URL}/rest/api/1.0/application-properties").mock(
+            return_value=httpx.Response(200, json={
+                "version": "8.19.2",
+                "displayName": "Bitbucket",
+            })
+        )
+
+        await client.check_connectivity()
+        await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_check_connectivity_failure(self, client):
+        respx.get(f"{BASE_URL}/rest/api/1.0/application-properties").mock(
+            return_value=httpx.Response(401, text="Unauthorized")
+        )
+
+        # Should not raise — just logs a warning
+        await client.check_connectivity()
+        await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
     async def test_fetch_pr_diff(self, client):
         diff_text = "diff --git a/file.py b/file.py\n+hello\n"
         respx.get(

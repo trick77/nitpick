@@ -133,5 +133,20 @@ class JiraClient:
             status=status,
         )
 
+    async def check_connectivity(self) -> bool:
+        try:
+            url = f"{self.config.url.rstrip('/')}/rest/api/2/myself"
+            response = await self.client.get(url)
+            response.raise_for_status()
+            data = response.json()
+            logger.info(
+                "Jira connectivity OK — authenticated as %s",
+                data.get("displayName", data.get("name", "?")),
+            )
+            return True
+        except Exception:
+            logger.warning("Jira connectivity check failed", exc_info=True)
+            return False
+
     async def close(self):
         await self.client.aclose()

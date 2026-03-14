@@ -382,7 +382,7 @@ class TestCopilotClient:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_validate_model_found(self, copilot_config, review_config):
+    async def test_check_connectivity_found(self, copilot_config, review_config):
         models_response = {
             "data": [
                 {
@@ -406,7 +406,7 @@ class TestCopilotClient:
 
         client = CopilotClient(copilot_config, review_config)
         try:
-            result = await client.validate_model()
+            result = await client.check_connectivity()
             assert result is not None
             assert result["id"] == "openai/gpt-4.1"
         finally:
@@ -414,7 +414,7 @@ class TestCopilotClient:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_validate_model_not_found(self, copilot_config, review_config):
+    async def test_check_connectivity_not_found(self, copilot_config, review_config):
         models_response = {"data": [{"id": "other-model"}]}
 
         respx.get("https://models.github.ai/catalog/models").mock(
@@ -423,7 +423,7 @@ class TestCopilotClient:
 
         client = CopilotClient(copilot_config, review_config)
         try:
-            result = await client.validate_model()
+            result = await client.check_connectivity()
             assert result is None
         finally:
             await client.close()

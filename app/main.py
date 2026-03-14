@@ -48,9 +48,15 @@ async def lifespan(app: FastAPI):
         jira_client = JiraClient(config.jira)
         logger.info("Jira integration enabled (%s)", config.jira.url)
 
-    reviewer = Reviewer(bitbucket_client, copilot_client, config.review, jira=jira_client)
+    await bitbucket_client.check_connectivity()
+    await copilot_client.check_connectivity()
 
-    await copilot_client.validate_model()
+    if jira_client:
+        if not await jira_client.check_connectivity():
+            logger.warning("Jira integration disabled due to connectivity failure")
+            jira_client = None
+
+    reviewer = Reviewer(bitbucket_client, copilot_client, config.review, jira=jira_client)
     logger.info("Bridge service started, model=%s", config.copilot.model)
 
     yield
