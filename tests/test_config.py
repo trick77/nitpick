@@ -59,8 +59,8 @@ def test_log_config_masks_secrets(caplog):
 def test_diff_context_defaults():
     rc = ReviewConfig()
     assert rc.diff_extra_lines_before == 3
-    assert rc.diff_extra_lines_after == 1
-    assert rc.diff_max_extra_lines_dynamic_context == 8
+    assert rc.diff_extra_lines_after == 2
+    assert rc.diff_max_extra_lines_dynamic_context == 10
     assert rc.diff_allow_dynamic_context is True
     assert rc.ticket_compliance_check is True
 
