@@ -264,6 +264,7 @@ class Reviewer:
                 deleted_file_paths=deleted_paths,
                 renamed_file_paths=renamed_paths,
                 ticket_context=ticket_context,
+                ticket_compliance_check=self.review_config.ticket_compliance_check,
             )
 
             existing = await self._fetch_existing_comments(project_key, repo_slug, pr_id)
@@ -299,6 +300,8 @@ class Reviewer:
                 ticket=ticket,
                 compliance_requirements=result.compliance_requirements,
                 elapsed=elapsed,
+                jira_enabled=self.jira is not None,
+                ticket_compliance_check=self.review_config.ticket_compliance_check,
             )
             try:
                 existing_summary = next(
@@ -443,6 +446,8 @@ class Reviewer:
         ticket: JiraTicket | None = None,
         compliance_requirements: list[dict] | None = None,
         elapsed: float | None = None,
+        jira_enabled: bool = False,
+        ticket_compliance_check: bool = True,
     ) -> str:
         if not findings:
             summary = "🤖 **Review summary:** No issues found. ✅"
@@ -467,7 +472,7 @@ class Reviewer:
         ticket_section = ""
         if ticket:
             ticket_lines = [f"**🎫 Ticket: [{ticket.key}]({ticket.url})**"]
-            if compliance_requirements:
+            if ticket_compliance_check and compliance_requirements:
                 met_count = sum(1 for r in compliance_requirements if r.get("met"))
                 total_count = len(compliance_requirements)
                 if met_count == total_count:
@@ -482,7 +487,11 @@ class Reviewer:
                 ticket_lines.append(f"- {compliance_emoji} Compliance: **{compliance_level}**")
                 req_lines = [f"    - {'✅' if r.get('met') else '❌'} {r.get('requirement', '???')}" for r in compliance_requirements]
                 ticket_lines.append(f"  - 📋 Requirements:\n" + "\n".join(req_lines))
+            elif not ticket_compliance_check:
+                ticket_lines.append("- ℹ️ Ticket compliance check is disabled")
             ticket_section = "\n\n" + "\n".join(ticket_lines)
+        elif jira_enabled:
+            ticket_section = "\n\n" + "ℹ️ No Jira ticket found in branch name or PR title"
 
         meta = []
         if findings and security_findings:

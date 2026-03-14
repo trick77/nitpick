@@ -28,6 +28,7 @@ class ReviewConfig(BaseModel):
     ramsay_authors: list[str] = []
     mention_trigger: str = "noergler"
     mention_prompt_template: str = "prompts/mention.txt"
+    ticket_compliance_check: bool = True
 
     @field_validator("auto_review_authors", "ramsay_authors", mode="before")
     @classmethod
@@ -108,6 +109,7 @@ def load_config() -> AppConfig:
             ramsay_authors=_env("REVIEW_RAMSAY_AUTHORS", ""),
             mention_trigger=_env("REVIEW_MENTION_TRIGGER", "noergler"),
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
+            ticket_compliance_check=_env("REVIEW_TICKET_COMPLIANCE_CHECK", "true").lower() in ("true", "1", "yes"),
         ),
         jira=JiraConfig(
             base_url=_env("JIRA_BASE_URL", ""),

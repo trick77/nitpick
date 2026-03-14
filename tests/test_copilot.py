@@ -478,6 +478,103 @@ class TestRepoInstructionsInReviewPrompt:
             await client.close()
 
 
+class TestComplianceInstructions:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_compliance_instructions_included_when_enabled_with_ticket(self, copilot_config, review_config):
+        review_response = {
+            "choices": [{"message": {"content": "[]"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        route = respx.post("https://models.github.ai/inference/chat/completions").mock(
+            return_value=httpx.Response(200, json=review_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(
+                files, ticket_context="Jira ticket SEP-123", ticket_compliance_check=True,
+            )
+            sent_body = json.loads(route.calls[0].request.content)
+            prompt = sent_body["messages"][1]["content"]
+            assert "compliance_requirements" in prompt
+            assert "{compliance_instructions}" not in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_compliance_instructions_excluded_when_disabled(self, copilot_config, review_config):
+        review_response = {
+            "choices": [{"message": {"content": "[]"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        route = respx.post("https://models.github.ai/inference/chat/completions").mock(
+            return_value=httpx.Response(200, json=review_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(
+                files, ticket_context="Jira ticket SEP-123", ticket_compliance_check=False,
+            )
+            sent_body = json.loads(route.calls[0].request.content)
+            prompt = sent_body["messages"][1]["content"]
+            assert "compliance_requirements" not in prompt
+            assert "{compliance_instructions}" not in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_compliance_instructions_excluded_when_no_ticket_context(self, copilot_config, review_config):
+        review_response = {
+            "choices": [{"message": {"content": "[]"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        route = respx.post("https://models.github.ai/inference/chat/completions").mock(
+            return_value=httpx.Response(200, json=review_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(
+                files, ticket_context="", ticket_compliance_check=True,
+            )
+            sent_body = json.loads(route.calls[0].request.content)
+            prompt = sent_body["messages"][1]["content"]
+            assert "compliance_requirements" not in prompt
+            assert "{compliance_instructions}" not in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_ticket_context_always_present_regardless_of_compliance_flag(self, copilot_config, review_config):
+        review_response = {
+            "choices": [{"message": {"content": "[]"}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        route = respx.post("https://models.github.ai/inference/chat/completions").mock(
+            return_value=httpx.Response(200, json=review_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(
+                files, ticket_context="Jira ticket SEP-123", ticket_compliance_check=False,
+            )
+            sent_body = json.loads(route.calls[0].request.content)
+            prompt = sent_body["messages"][1]["content"]
+            assert "Jira ticket SEP-123" in prompt
+        finally:
+            await client.close()
+
+
 class TestAnswerQuestion:
     @pytest.mark.asyncio
     @respx.mock

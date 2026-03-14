@@ -64,14 +64,7 @@ Respond with a JSON array. Each item must have:
 
 If no issues meet the confidence threshold, return an empty array: []
 
-If ticket context is provided above, evaluate whether the code changes align with the ticket's requirements.
-
-When ticket context is present, respond with a JSON object:
-{"findings": [ ...findings array as described above... ], "compliance_requirements": [{"requirement": "short description", "met": true}, {"requirement": "short description", "met": false}]}
-
-compliance_requirements: List ALL key requirements from the ticket. For each, set "met" to true if the PR addresses it, false if not. Keep requirement descriptions short (one line).
-
-When no ticket context is present, respond with the JSON array of findings only (current behavior).
+{compliance_instructions}
 
 Do not invent problems. Do not flag stylistic preferences, naming opinions, or minor formatting issues. Every reported issue must be a real defect or a clear violation of the project guidelines.
 

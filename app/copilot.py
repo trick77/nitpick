@@ -266,6 +266,21 @@ def _render_supplementary_context(
     return "\n\n".join(sections)
 
 
+COMPLIANCE_INSTRUCTIONS = (
+    "If ticket context is provided above, evaluate whether the code changes align with the ticket's requirements.\n"
+    "\n"
+    "When ticket context is present, respond with a JSON object:\n"
+    '{"findings": [ ...findings array as described above... ], '
+    '"compliance_requirements": [{"requirement": "short description", "met": true}, '
+    '{"requirement": "short description", "met": false}]}\n'
+    "\n"
+    "compliance_requirements: List ALL key requirements from the ticket. For each, "
+    'set "met" to true if the PR addresses it, false if not. Keep requirement descriptions short (one line).\n'
+    "\n"
+    "When no ticket context is present, respond with the JSON array of findings only (current behavior)."
+)
+
+
 class CopilotClient:
     def __init__(self, config: CopilotConfig, review_config: ReviewConfig):
         self.config = config
@@ -391,11 +406,17 @@ class CopilotClient:
         deleted_file_paths: list[str] | None = None,
         renamed_file_paths: list[str] | None = None,
         ticket_context: str = "",
+        ticket_compliance_check: bool = True,
     ) -> "CopilotClient.ReviewResult":
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.prompt_template.replace("{tone}", tone_text)
         template = template.replace("{repo_instructions}", repo_instructions)
         template = template.replace("{ticket_context}", ticket_context or "No ticket context provided.")
+
+        if ticket_compliance_check and ticket_context:
+            template = template.replace("{compliance_instructions}", COMPLIANCE_INSTRUCTIONS)
+        else:
+            template = template.replace("{compliance_instructions}", "")
 
         supplementary = _render_supplementary_context(
             other_modified_paths, deleted_file_paths, renamed_file_paths,

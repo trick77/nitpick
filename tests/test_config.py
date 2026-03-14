@@ -62,6 +62,7 @@ def test_diff_context_defaults():
     assert rc.diff_extra_lines_after == 1
     assert rc.diff_max_extra_lines_dynamic_context == 8
     assert rc.diff_allow_dynamic_context is True
+    assert rc.ticket_compliance_check is True
 
 
 def test_diff_context_from_env(monkeypatch):
@@ -82,3 +83,30 @@ def test_diff_context_from_env(monkeypatch):
     assert config.review.diff_extra_lines_after == 2
     assert config.review.diff_max_extra_lines_dynamic_context == 12
     assert config.review.diff_allow_dynamic_context is False
+
+
+def test_ticket_compliance_check_from_env(monkeypatch):
+    env = {
+        "BITBUCKET_URL": "https://bb.example.com",
+        "BITBUCKET_TOKEN": "tok",
+        "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "GITHUB_TOKEN": "ghp_tok",
+        "REVIEW_TICKET_COMPLIANCE_CHECK": "false",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    config = load_config()
+    assert config.review.ticket_compliance_check is False
+
+
+def test_ticket_compliance_check_default_from_env(monkeypatch):
+    env = {
+        "BITBUCKET_URL": "https://bb.example.com",
+        "BITBUCKET_TOKEN": "tok",
+        "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "GITHUB_TOKEN": "ghp_tok",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    config = load_config()
+    assert config.review.ticket_compliance_check is True
