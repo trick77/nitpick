@@ -708,6 +708,63 @@ class TestHandleMention:
         mock_copilot.answer_question.assert_not_called()
 
 
+class TestMaxFileLines:
+    @pytest.mark.asyncio
+    async def test_file_under_limit_keeps_content(self, mock_bitbucket, mock_copilot):
+        content = "\n".join(f"line {i}" for i in range(50))  # 50 lines
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value=content)
+        mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
+
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100))
+        payload = _make_payload("username")
+        await rev.review_pull_request(payload)
+
+        mock_copilot.review_diff.assert_called_once()
+        files = mock_copilot.review_diff.call_args[0][0]
+        assert len(files) == 1
+        assert files[0].content == content
+
+    @pytest.mark.asyncio
+    async def test_file_over_limit_falls_back_to_diff_only(self, mock_bitbucket, mock_copilot):
+        content = "\n".join(f"line {i}" for i in range(200))  # 200 lines
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value=content)
+        mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
+
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100))
+        payload = _make_payload("username")
+        await rev.review_pull_request(payload)
+
+        mock_copilot.review_diff.assert_called_once()
+        files = mock_copilot.review_diff.call_args[0][0]
+        assert len(files) == 1
+        assert files[0].content is None
+
+    @pytest.mark.asyncio
+    async def test_content_skipped_appears_in_summary(self, mock_bitbucket, mock_copilot):
+        content = "\n".join(f"line {i}" for i in range(200))  # 200 lines
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value=content)
+        mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
+
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100))
+        payload = _make_payload("username")
+        await rev.review_pull_request(payload)
+
+        summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "Reviewed without full file context (too large)" in summary_text
+        assert "`file.py`" in summary_text
+
+    def test_build_summary_content_skipped_files(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        summary = rev._build_summary([], content_skipped_files=["large.py"])
+        assert "Reviewed without full file context (too large)" in summary
+        assert "`large.py`" in summary
+
+    def test_build_summary_no_content_skipped_files(self, mock_bitbucket, mock_copilot):
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        summary = rev._build_summary([], content_skipped_files=[])
+        assert "Reviewed without full file context" not in summary
+
+
 class TestTicketExtraction:
     def test_extract_ticket_id_from_branch(self, mock_bitbucket, mock_copilot):
         rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())

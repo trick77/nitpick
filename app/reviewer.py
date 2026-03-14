@@ -114,7 +114,7 @@ class Reviewer:
         diff: str,
         source_commit: str | None,
         pr_tag: str,
-    ) -> list[FileReviewData]:
+    ) -> tuple[list[FileReviewData], list[str]]:
         all_file_diffs = split_by_file(diff)
         file_diffs = [fd for fd in all_file_diffs if is_reviewable_diff(fd)]
         skipped = len(all_file_diffs) - len(file_diffs)
@@ -123,7 +123,10 @@ class Reviewer:
             pr_tag, len(all_file_diffs), len(file_diffs), skipped,
         )
         if not file_diffs:
-            return []
+            return [], []
+
+        content_skipped: list[str] = []
+        max_file_lines = self.review_config.max_file_lines
 
         async def _build_file_data(file_diff: str) -> FileReviewData | None:
             path = extract_path(file_diff)
@@ -140,6 +143,10 @@ class Reviewer:
                     )
                 except Exception:
                     logger.warning("Failed to fetch content for %s, using diff only", path)
+            if content and content.count("\n") + 1 > max_file_lines:
+                logger.info("Skipping full content for %s (%d lines > limit %d)", path, content.count("\n") + 1, max_file_lines)
+                content = None
+                content_skipped.append(path)
             if content:
                 logger.info("Including %s with full file content (%d lines)", path, content.count("\n") + 1)
             return FileReviewData(path=path, diff=file_diff, content=content)
@@ -158,7 +165,7 @@ class Reviewer:
             files_with_content, files_diff_only,
         )
 
-        return files
+        return files, content_skipped
 
     async def review_pull_request(self, payload: WebhookPayload, *, skip_author_check: bool = False) -> None:
         pr_tag = "unknown"
@@ -195,7 +202,7 @@ class Reviewer:
                 return
 
             source_commit = pr.fromRef.latestCommit
-            files = await self._prepare_files(
+            files, content_skipped = await self._prepare_files(
                 project_key, repo_slug, diff, source_commit, pr_tag
             )
 
@@ -301,6 +308,7 @@ class Reviewer:
                 truncated,
                 agents_md_found=agents_md_found,
                 skipped_files=result.skipped_files,
+                content_skipped_files=content_skipped,
                 token_usage=(result.prompt_tokens, result.completion_tokens),
                 prompt_breakdown=result.prompt_breakdown,
                 review_effort=result.review_effort,
@@ -373,7 +381,7 @@ class Reviewer:
         try:
             diff = await self.bitbucket.fetch_pr_diff(project_key, repo_slug, pr.id, context_lines=0)
             source_commit = pr.fromRef.latestCommit
-            files = await self._prepare_files(
+            files, _ = await self._prepare_files(
                 project_key, repo_slug, diff, source_commit, pr_tag
             )
             if not files:
@@ -456,6 +464,7 @@ class Reviewer:
         truncated: bool = False,
         agents_md_found: bool = False,
         skipped_files: list[str] | None = None,
+        content_skipped_files: list[str] | None = None,
         token_usage: tuple[int, int] | None = None,
         prompt_breakdown: dict[str, int] | None = None,
         review_effort: int | None = None,
@@ -519,6 +528,9 @@ class Reviewer:
         if skipped_files:
             file_list = ", ".join(f"`{f}`" for f in skipped_files)
             meta.append(f"⚠️ Not reviewed (too large): {file_list}")
+        if content_skipped_files:
+            file_list = ", ".join(f"`{f}`" for f in content_skipped_files)
+            meta.append(f"⚠️ Reviewed without full file context (too large): {file_list}")
 
         if agents_md_found:
             meta.append("✅ Using project-specific review guidelines from `AGENTS.md`")

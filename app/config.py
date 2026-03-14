@@ -20,6 +20,7 @@ class CopilotConfig(BaseModel):
 class ReviewConfig(BaseModel):
     auto_review_authors: list[str] = []
     max_comments: int = 25
+    max_file_lines: int = 1000
     diff_extra_lines_before: int = 3
     diff_extra_lines_after: int = 2
     diff_max_extra_lines_dynamic_context: int = 10
@@ -109,6 +110,7 @@ def load_config() -> AppConfig:
         review=ReviewConfig(
             auto_review_authors=_env("REVIEW_AUTO_REVIEW_AUTHORS", ""),
             max_comments=int(_env("REVIEW_MAX_COMMENTS", "25")),
+            max_file_lines=int(_env("REVIEW_MAX_FILE_LINES", "1000")),
             diff_extra_lines_before=int(_env("REVIEW_DIFF_EXTRA_LINES_BEFORE", "3")),
             diff_extra_lines_after=int(_env("REVIEW_DIFF_EXTRA_LINES_AFTER", "2")),
             diff_max_extra_lines_dynamic_context=int(_env("REVIEW_DIFF_MAX_EXTRA_LINES_DYNAMIC_CONTEXT", "10")),
