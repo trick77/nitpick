@@ -54,28 +54,16 @@ The mention trigger name defaults to `noergler` and can be changed via `REVIEW_M
 
 ## Configuration
 
-All configuration is driven by environment variables.
+All configuration is driven by environment variables. The four required variables are:
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `BITBUCKET_URL` | Yes | — | Bitbucket Server base URL |
-| `BITBUCKET_TOKEN` | Yes | — | Bitbucket Server API token |
-| `BITBUCKET_WEBHOOK_SECRET` | Yes | — | Webhook HMAC secret for signature validation |
-| `GITHUB_TOKEN` | Yes | — | GitHub fine-grained access token with `models:read` scope |
-| `REVIEW_AUTO_REVIEW_AUTHORS` | No | _(empty)_ | Comma-separated list of Bitbucket usernames whose PRs are automatically reviewed. When empty or unset, all PR authors are reviewed. Mention-triggered reviews (`@noergler review`) bypass this check. |
-| `REVIEW_MAX_COMMENTS` | No | `25` | Maximum inline comments per review |
-| `REVIEW_DIFF_EXTRA_LINES_BEFORE` | No | `3` | Context lines to add before each diff hunk (asymmetric: more before than after aids comprehension) |
-| `REVIEW_DIFF_EXTRA_LINES_AFTER` | No | `1` | Context lines to add after each diff hunk |
-| `REVIEW_DIFF_MAX_EXTRA_LINES_DYNAMIC_CONTEXT` | No | `8` | Max additional lines to search backwards for enclosing function/class scope |
-| `REVIEW_DIFF_ALLOW_DYNAMIC_CONTEXT` | No | `true` | Enable dynamic scope expansion (extends context to include enclosing function/class definition) |
-| `REVIEW_PROMPT_TEMPLATE` | No | `prompts/review.txt` | Path to the review prompt template |
-| `REVIEW_MENTION_TRIGGER` | No | `noergler` | Trigger name for mention-based interactions (used as `@<trigger>` in PR comments) |
-| `REVIEW_MENTION_PROMPT_TEMPLATE` | No | `prompts/mention.txt` | Path to the mention Q&A prompt template |
-| `COPILOT_MODEL` | No | `openai/gpt-4.1` | Model ID for the GitHub Models API |
-| `COPILOT_API_URL` | No | `https://models.github.ai/inference/chat/completions` | GitHub Models API endpoint |
-| `COPILOT_MAX_TOKENS_PER_CHUNK` | No | `80000` | Max tokens per diff chunk sent to the model |
-| `SERVER_HOST` | No | `0.0.0.0` | Host to bind the server to |
-| `SERVER_PORT` | No | `8080` | Port to bind the server to |
+| Variable | Description |
+|---|---|
+| `BITBUCKET_URL` | Bitbucket Server base URL |
+| `BITBUCKET_TOKEN` | Bitbucket Server API token |
+| `BITBUCKET_WEBHOOK_SECRET` | Webhook HMAC secret for signature validation |
+| `GITHUB_TOKEN` | GitHub fine-grained access token with `models:read` scope |
+
+See [`.env.example`](.env.example) for all optional settings and their defaults.
 
 ## Webhook setup
 
