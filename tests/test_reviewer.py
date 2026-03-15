@@ -1014,6 +1014,7 @@ def _make_feedback_payload(
 ) -> WebhookPayload:
     return WebhookPayload(**{
         "eventKey": "pr:comment:added",
+        "commentParentId": parent_id,
         "pullRequest": {
             "id": 42,
             "title": "Test PR",
@@ -1035,7 +1036,6 @@ def _make_feedback_payload(
             "id": 200,
             "text": reply_text,
             "author": {"name": author},
-            "parent": {"id": parent_id},
         },
     })
 

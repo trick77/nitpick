@@ -48,18 +48,18 @@ COMMENT_NO_MENTION_PAYLOAD = {
 
 COMMENT_REPLY_PAYLOAD = {
     "eventKey": "pr:comment:added",
+    "commentParentId": 100,
     "comment": {
         "id": 200, "text": "\U0001f44d", "author": {"name": "dev"},
-        "parent": {"id": 100},
     },
     "pullRequest": PR_PAYLOAD["pullRequest"],
 }
 
 COMMENT_REPLY_WITH_MENTION_PAYLOAD = {
     "eventKey": "pr:comment:added",
+    "commentParentId": 100,
     "comment": {
         "id": 201, "text": "@noergler explain this", "author": {"name": "dev"},
-        "parent": {"id": 100},
     },
     "pullRequest": PR_PAYLOAD["pullRequest"],
 }

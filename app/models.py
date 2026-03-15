@@ -51,6 +51,7 @@ class WebhookPayload(BaseModel):
     eventKey: str
     pullRequest: PullRequest
     comment: Comment | None = None
+    commentParentId: int | None = None
     actor: PullRequestUser | None = None
 
 

@@ -459,8 +459,8 @@ class Reviewer:
 
     async def handle_feedback(self, payload: WebhookPayload) -> None:
         comment = payload.comment
-        if not comment or not comment.parent:
-            logger.info("Feedback skipped: no comment or no parent")
+        if not comment or payload.commentParentId is None:
+            logger.info("Feedback skipped: no comment or no commentParentId")
             return
 
         if NOERGLER_MARKER in comment.text:
@@ -474,7 +474,7 @@ class Reviewer:
             return
 
         pr_tag = f"{project_key}/{repo_slug}#{pr.id}"
-        parent_id = comment.parent.id
+        parent_id = payload.commentParentId
 
         try:
             existing = await self.bitbucket.fetch_pr_comments(project_key, repo_slug, pr.id)
