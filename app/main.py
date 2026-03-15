@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
-from app.bitbucket import BitbucketClient
+from app.bitbucket import NOERGLER_MARKER, BitbucketClient
 from app.config import load_config, log_config
 from app.copilot import CopilotClient
 from app.jira import JiraClient
@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         if not await jira_client.check_connectivity():
             jira_client = None
 
-    reviewer = Reviewer(bitbucket_client, copilot_client, config.review, jira=jira_client)
+    reviewer = Reviewer(bitbucket_client, copilot_client, config.review, jira=jira_client, server_config=config.server)
     logger.info("Bridge service started, model=%s", config.copilot.model)
 
     yield
@@ -82,6 +82,26 @@ def _verify_webhook_signature(body: bytes, signature: str, secret: str) -> bool:
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/feedback/probe/{project}/{repo}/{pr_id}")
+async def probe_feedback(project: str, repo: str, pr_id: int):
+    comments = await bitbucket_client.fetch_pr_comments(project, repo, pr_id)
+    noergler_comments = [c for c in comments if NOERGLER_MARKER in c.get("text", "")]
+
+    if not noergler_comments:
+        return {"error": "No noergler comments found on this PR"}
+
+    comment = noergler_comments[0]
+    reactions = await bitbucket_client.probe_comment_reactions(
+        project, repo, pr_id, comment["id"]
+    )
+    return {
+        "comment_id": comment["id"],
+        "comment_preview": comment["text"][:100],
+        "total_noergler_comments": len(noergler_comments),
+        "api_results": reactions,
+    }
 
 
 @app.post("/webhook")

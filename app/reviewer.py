@@ -14,7 +14,7 @@ from app.copilot import (
     is_reviewable_diff,
     split_by_file,
 )
-from app.config import ReviewConfig
+from app.config import ReviewConfig, ServerConfig
 from app.context_expansion import expand_all_files
 from app.diff_compression import compress_for_large_pr, is_small_pr
 from app.jira import JiraClient, JiraTicket
@@ -54,11 +54,13 @@ class Reviewer:
         copilot: CopilotClient,
         review_config: ReviewConfig,
         jira: JiraClient | None = None,
+        server_config: ServerConfig | None = None,
     ):
         self.bitbucket = bitbucket
         self.copilot = copilot
         self.review_config = review_config
         self.jira = jira
+        self.server_config = server_config or ServerConfig()
         self.auto_review_authors = review_config.auto_review_authors
         self.max_comments = review_config.max_comments
         self.mention_trigger = review_config.mention_trigger
@@ -346,6 +348,13 @@ class Reviewer:
             if failed:
                 parts.append(f"{failed} failed")
             logger.info(" — ".join(parts))
+
+            probe_host = self.server_config.host if self.server_config.host != "0.0.0.0" else "localhost"
+            logger.info(
+                "Feedback probe URL: http://%s:%s/feedback/probe/%s/%s/%d",
+                probe_host, self.server_config.port,
+                project_key, repo_slug, pr_id,
+            )
         except Exception:
             logger.error("Review of %s failed", pr_tag, exc_info=True)
 

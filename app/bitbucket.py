@@ -141,6 +141,27 @@ class BitbucketClient:
         logger.debug("Updated summary comment %d on PR %d", comment_id, pr_id)
         return True
 
+    async def probe_comment_reactions(
+        self, project: str, repo: str, pr_id: int, comment_id: int
+    ) -> dict:
+        results = {}
+        endpoints = {
+            "likes": f"/rest/comment-likes/latest/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments/{comment_id}/likes",
+            "reactions": f"/rest/comment-likes/latest/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments/{comment_id}/reactions",
+            "comment_detail": f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments/{comment_id}",
+            "emoticons": "/rest/emoticons/latest/emoticons",
+        }
+        for name, url in endpoints.items():
+            try:
+                response = await self.client.get(url)
+                results[name] = {
+                    "status": response.status_code,
+                    "body": response.json() if response.status_code == 200 else response.text,
+                }
+            except Exception as e:
+                results[name] = {"status": "error", "body": str(e)}
+        return results
+
     async def fetch_pr_comments(
         self, project: str, repo: str, pr_id: int
     ) -> list[dict]:
