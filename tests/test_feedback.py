@@ -8,6 +8,9 @@ class TestIsDisagreed:
     def test_case_insensitive(self):
         assert is_disagreed("DISAGREE") is True
 
+    def test_with_exclamation(self):
+        assert is_disagreed("disagree!") is True
+
     def test_embedded_in_sentence(self):
         assert is_disagreed("I disagree with this") is True
 

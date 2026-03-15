@@ -79,7 +79,7 @@ class BitbucketClient:
         ]
         if finding.suggestion:
             parts.append(f"**Suggested change:**\n```\n{finding.suggestion}\n```")
-        parts.append("_Not helpful? Reply with \"not helpful\" to this comment._")
+        parts.append("_Disagree? Reply with \"disagree\" to this comment._")
         parts.append(NOERGLER_MARKER)
         text = "\n\n".join(parts)
         payload = {

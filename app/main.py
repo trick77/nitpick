@@ -26,11 +26,16 @@ class _HealthFilter(logging.Filter):
         return "/health" not in record.getMessage()
 
 
-_access_logger = logging.getLogger("uvicorn.access")
-_access_logger.addFilter(_HealthFilter())
-_access_logger.handlers.clear()
-_access_logger.propagate = True
+logging.getLogger("uvicorn.access").addFilter(_HealthFilter())
 logger = logging.getLogger(__name__)
+
+
+def _unify_uvicorn_logging() -> None:
+    """Force all uvicorn loggers to propagate to the root logger for consistent formatting."""
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(name)
+        uv_logger.handlers.clear()
+        uv_logger.propagate = True
 
 config = None
 reviewer = None
@@ -43,6 +48,7 @@ jira_client = None
 async def lifespan(app: FastAPI):
     global config, reviewer, bitbucket_client, copilot_client, jira_client
 
+    _unify_uvicorn_logging()
     config = load_config()
     log_config(config, logger)
     bitbucket_client = BitbucketClient(config.bitbucket)

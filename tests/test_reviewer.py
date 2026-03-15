@@ -1135,6 +1135,19 @@ class TestHandleFeedback:
         mock_bitbucket.add_comment_reaction.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_ignores_reply_to_summary_comment(self, mock_bitbucket, mock_copilot):
+        mock_bitbucket.fetch_pr_comments.return_value = [
+            {"id": 10, "text": f"Summary\n\n{NOERGLER_MARKER}", "path": None, "line": None, "parent_id": None},
+        ]
+        mock_bitbucket.add_comment_reaction = AsyncMock()
+
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        await rev.handle_feedback(_make_feedback_payload("disagree", parent_id=10))
+
+        mock_bitbucket.add_comment_reaction.assert_not_called()
+        mock_bitbucket.reply_to_comment.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_aggregate_stats_no_double_count_when_reply_already_fetched(
         self, mock_bitbucket, mock_copilot, caplog
     ):
@@ -1175,7 +1188,7 @@ class TestHandlePrMerged:
 
         stat_record = next(r for r in caplog.records if "merged" in r.message)
         assert "3 comments" in stat_record.message
-        assert "2 not helpful" in stat_record.message
+        assert "2 disagreed" in stat_record.message
         assert "33% useful" in stat_record.message
 
     @pytest.mark.asyncio
@@ -1207,5 +1220,5 @@ class TestHandlePrMerged:
 
         stat_record = next(r for r in caplog.records if "merged" in r.message)
         assert "2 comments" in stat_record.message
-        assert "0 not helpful" in stat_record.message
+        assert "0 disagreed" in stat_record.message
         assert "100% useful" in stat_record.message

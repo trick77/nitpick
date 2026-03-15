@@ -441,18 +441,18 @@ class Reviewer:
                 logger.info("%s merged — no review comments", pr_tag)
                 return
 
-            not_helpful = 0
+            disagreed = 0
             for c in comments:
                 parent_id = c.get("parent_id")
                 if parent_id in noergler_inline and NOERGLER_MARKER not in c.get("text", ""):
                     if classify_feedback(c.get("text", "")) == "negative":
-                        not_helpful += 1
+                        disagreed += 1
 
             total = len(noergler_inline)
-            useful_pct = (total - not_helpful) / total * 100
+            useful_pct = (total - disagreed) / total * 100
             logger.info(
-                "%s merged — %d comments, %d not helpful (%.0f%% useful)",
-                pr_tag, total, not_helpful, useful_pct,
+                "%s merged — %d comments, %d disagreed (%.0f%% useful)",
+                pr_tag, total, disagreed, useful_pct,
             )
         except Exception:
             logger.error("Merged stats for %s failed", pr_tag, exc_info=True)
@@ -460,14 +460,17 @@ class Reviewer:
     async def handle_feedback(self, payload: WebhookPayload) -> None:
         comment = payload.comment
         if not comment or not comment.parent:
+            logger.debug("Feedback skipped: no comment or no parent")
             return
 
         if NOERGLER_MARKER in comment.text:
+            logger.debug("Feedback skipped: reply contains marker (bot's own reply)")
             return
 
         pr = payload.pullRequest
         project_key, repo_slug = self._extract_project_repo(payload)
         if not project_key or not repo_slug:
+            logger.debug("Feedback skipped: could not extract project/repo")
             return
 
         pr_tag = f"{project_key}/{repo_slug}#{pr.id}"
@@ -480,10 +483,16 @@ class Reviewer:
             )
 
             if not parent_comment or NOERGLER_MARKER not in parent_comment.get("text", ""):
+                logger.debug("Feedback skipped on %s: parent %d not found or missing marker", pr_tag, parent_id)
+                return
+
+            if not parent_comment.get("path"):
+                logger.debug("Feedback skipped on %s: parent %d is not an inline comment", pr_tag, parent_id)
                 return
 
             classification = classify_feedback(comment.text)
             if classification != "negative":
+                logger.debug("Feedback skipped on %s: classified as %s", pr_tag, classification)
                 return
 
             logger.info(

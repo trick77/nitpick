@@ -173,7 +173,7 @@ class TestBitbucketClient:
         await client.post_inline_comment("PROJ", "my-repo", 1, finding)
 
         body = route.calls[0].request.content.decode()
-        assert "Reply with" in body and "not helpful" in body
+        assert "Reply with" in body and "disagree" in body
         await client.close()
 
     @pytest.mark.asyncio
