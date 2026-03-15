@@ -81,13 +81,9 @@ class Reviewer:
             return match.group(1)
         return None
 
-    async def _fetch_ticket_context(self, ticket_id: str) -> tuple[str, JiraTicket | None]:
-        if not self.jira:
-            return "", None
-        ticket = await self.jira.fetch_ticket(ticket_id)
-        if not ticket:
-            return "", None
-        lines = [f"### Jira ticket: [{ticket.key}]({ticket.url})"]
+    @staticmethod
+    def _format_ticket_block(ticket: JiraTicket, heading: str) -> list[str]:
+        lines = [f"### {heading}: [{ticket.key}]({ticket.url})"]
         lines.append(f"**Title:** {ticket.title}")
         if ticket.issue_type or ticket.status:
             type_status_parts = []
@@ -106,7 +102,24 @@ class Reviewer:
             lines.append("**Subtasks:**")
             for st in ticket.subtasks:
                 lines.append(f"- {st}")
-        return "\n".join(lines), ticket
+        return lines
+
+    async def _fetch_ticket_context(
+        self, ticket_id: str, parent: JiraTicket | None = None,
+    ) -> tuple[str, JiraTicket | None]:
+        if not self.jira:
+            return "", None
+        ticket = await self.jira.fetch_ticket(ticket_id)
+        if not ticket:
+            return "", None
+        blocks: list[str] = []
+        if parent:
+            blocks.extend(self._format_ticket_block(parent, "Parent ticket"))
+            blocks.append("")
+            blocks.extend(self._format_ticket_block(ticket, "Sub-task"))
+        else:
+            blocks.extend(self._format_ticket_block(ticket, "Jira ticket"))
+        return "\n".join(blocks), ticket
 
     def _tone_for_author(self, author: str) -> str:
         return "ramsay" if author in self.ramsay_authors else "default"
@@ -273,9 +286,13 @@ class Reviewer:
             ticket_id = self._extract_ticket_id(pr)
             ticket_context = ""
             ticket: JiraTicket | None = None
+            parent_ticket: JiraTicket | None = None
             if ticket_id and self.jira:
-                ticket_context, ticket = await self._fetch_ticket_context(ticket_id)
+                ticket, parent_ticket = await self.jira.fetch_ticket_with_parent(ticket_id)
                 if ticket:
+                    ticket_context, ticket = await self._fetch_ticket_context(
+                        ticket_id, parent=parent_ticket,
+                    )
                     logger.info("%s: linked Jira ticket %s", pr_tag, ticket_id)
 
             tone = self._tone_for_author(author_name)
@@ -320,6 +337,7 @@ class Reviewer:
                 prompt_breakdown=result.prompt_breakdown,
                 review_effort=result.review_effort,
                 ticket=ticket,
+                parent_ticket=parent_ticket,
                 compliance_requirements=result.compliance_requirements,
                 elapsed=elapsed,
                 jira_enabled=self.jira is not None,
@@ -405,7 +423,11 @@ class Reviewer:
             ticket_context = ""
             ticket_id = self._extract_ticket_id(pr)
             if ticket_id and self.jira:
-                ticket_context, _ = await self._fetch_ticket_context(ticket_id)
+                ticket, parent_ticket = await self.jira.fetch_ticket_with_parent(ticket_id)
+                if ticket:
+                    ticket_context, _ = await self._fetch_ticket_context(
+                        ticket_id, parent=parent_ticket,
+                    )
 
             tone = self._tone_for_author(pr.author.user.name)
             answer = await self.copilot.answer_question(
@@ -589,6 +611,7 @@ class Reviewer:
         prompt_breakdown: dict[str, int] | None = None,
         review_effort: int | None = None,
         ticket: JiraTicket | None = None,
+        parent_ticket: JiraTicket | None = None,
         compliance_requirements: list[dict] | None = None,
         elapsed: float | None = None,
         jira_enabled: bool = False,
@@ -616,7 +639,10 @@ class Reviewer:
 
         ticket_section = ""
         if ticket:
-            ticket_lines = [f"**🎫 Ticket: [{ticket.key}]({ticket.url})**"]
+            ticket_lines = []
+            if parent_ticket:
+                ticket_lines.append(f"**🎫 Parent: [{parent_ticket.key}]({parent_ticket.url})** — {parent_ticket.title}")
+            ticket_lines.append(f"**🎫 Ticket: [{ticket.key}]({ticket.url})**")
             if ticket_compliance_check and compliance_requirements:
                 met_count = sum(1 for r in compliance_requirements if r.get("met"))
                 total_count = len(compliance_requirements)

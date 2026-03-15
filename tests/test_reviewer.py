@@ -925,6 +925,32 @@ class TestBuildSummaryWithTicket:
         assert "**Type:**" not in context
         assert "**Status:**" not in context
 
+    @pytest.mark.asyncio
+    async def test_fetch_ticket_context_with_parent(self, mock_bitbucket, mock_copilot):
+        ticket = JiraTicket(
+            key="SEP-101", title="Implement subtask", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-101",
+            issue_type="Sub-task", parent_key="SEP-100",
+        )
+        parent = JiraTicket(
+            key="SEP-100", title="Parent story", description="Full desc",
+            labels=["backend"], acceptance_criteria="AC-1: Must work",
+            url="https://jira.example.com/browse/SEP-100",
+            issue_type="Story", status="In Progress",
+        )
+        mock_jira = AsyncMock()
+        mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
+        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        context, returned_ticket = await reviewer._fetch_ticket_context("SEP-101", parent=parent)
+        assert returned_ticket is ticket
+        assert "### Parent ticket: [SEP-100]" in context
+        assert "### Sub-task: [SEP-101]" in context
+        assert "Parent story" in context
+        assert "Implement subtask" in context
+        assert "Full desc" in context
+        assert "AC-1: Must work" in context
+
     def test_build_summary_jira_not_configured_no_ticket(self, reviewer):
         summary = reviewer._build_summary([], jira_enabled=False)
         assert "No Jira ticket found" not in summary
@@ -939,15 +965,17 @@ class TestBuildSummaryWithTicket:
 class TestReviewWithJira:
     @pytest.mark.asyncio
     async def test_review_with_jira_context(self, mock_bitbucket, mock_copilot):
-        mock_jira = AsyncMock()
-        mock_jira.fetch_ticket = AsyncMock(return_value=JiraTicket(
+        ticket = JiraTicket(
             key="SEP-123",
             title="Add login",
             description="Implement login page",
             labels=["frontend"],
             acceptance_criteria=None,
             url="https://jira.example.com/browse/SEP-123",
-        ))
+        )
+        mock_jira = AsyncMock()
+        mock_jira.fetch_ticket_with_parent = AsyncMock(return_value=(ticket, None))
+        mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
         result = _make_review_result(
             findings=[
                 ReviewFinding(file="file.py", line=1, severity="warning", comment="Test issue"),
@@ -963,7 +991,7 @@ class TestReviewWithJira:
         payload = _make_payload(branch="feature/SEP-123-login")
         await rev.review_pull_request(payload)
 
-        mock_jira.fetch_ticket.assert_called_once_with("SEP-123")
+        mock_jira.fetch_ticket_with_parent.assert_called_once_with("SEP-123")
         call_kwargs = mock_copilot.review_diff.call_args[1]
         assert "SEP-123" in call_kwargs["ticket_context"]
         assert "Add login" in call_kwargs["ticket_context"]
@@ -973,6 +1001,39 @@ class TestReviewWithJira:
         assert "⚠️ Compliance: **Partially compliant**" in summary_text
         assert "    - ✅ Implement login page" in summary_text
         assert "    - ❌ Add tests" in summary_text
+
+    @pytest.mark.asyncio
+    async def test_review_with_parent_ticket(self, mock_bitbucket, mock_copilot):
+        subtask = JiraTicket(
+            key="SEP-124", title="Implement subtask", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-124",
+            issue_type="Sub-task", parent_key="SEP-123",
+        )
+        parent = JiraTicket(
+            key="SEP-123", title="Parent story", description="Full description",
+            labels=["backend"], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-123",
+            issue_type="Story",
+        )
+        mock_jira = AsyncMock()
+        mock_jira.fetch_ticket_with_parent = AsyncMock(return_value=(subtask, parent))
+        mock_jira.fetch_ticket = AsyncMock(return_value=subtask)
+        mock_copilot.review_diff.return_value = _make_review_result()
+
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        payload = _make_payload(branch="feature/SEP-124-subtask")
+        await rev.review_pull_request(payload)
+
+        call_kwargs = mock_copilot.review_diff.call_args[1]
+        assert "Parent ticket" in call_kwargs["ticket_context"]
+        assert "SEP-123" in call_kwargs["ticket_context"]
+        assert "Sub-task" in call_kwargs["ticket_context"]
+        assert "SEP-124" in call_kwargs["ticket_context"]
+
+        summary_text = mock_bitbucket.update_pr_comment.call_args[0][5] if mock_bitbucket.update_pr_comment.called else mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "Parent: [SEP-123]" in summary_text
+        assert "SEP-124" in summary_text
 
     @pytest.mark.asyncio
     async def test_review_jira_disabled(self, mock_bitbucket, mock_copilot):
@@ -986,12 +1047,14 @@ class TestReviewWithJira:
 
     @pytest.mark.asyncio
     async def test_review_passes_ticket_compliance_check_flag(self, mock_bitbucket, mock_copilot):
-        mock_jira = AsyncMock()
-        mock_jira.fetch_ticket = AsyncMock(return_value=JiraTicket(
+        ticket = JiraTicket(
             key="SEP-123", title="Add login", description=None,
             labels=[], acceptance_criteria=None,
             url="https://jira.example.com/browse/SEP-123",
-        ))
+        )
+        mock_jira = AsyncMock()
+        mock_jira.fetch_ticket_with_parent = AsyncMock(return_value=(ticket, None))
+        mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
         mock_copilot.review_diff.return_value = _make_review_result()
 
         rev = Reviewer(

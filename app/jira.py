@@ -20,6 +20,7 @@ class JiraTicket:
     url: str = ""
     issue_type: str | None = None
     status: str | None = None
+    parent_key: str | None = None
 
     MAX_DESCRIPTION_LENGTH = 5000
 
@@ -80,7 +81,7 @@ class JiraClient:
     async def fetch_ticket(self, ticket_id: str) -> JiraTicket | None:
         url = (
             f"{self.config.url.rstrip('/')}/rest/api/2/issue/{ticket_id}"
-            f"?fields=summary,description,labels,subtasks,issuetype,status"
+            f"?fields=summary,description,labels,subtasks,issuetype,status,parent"
         )
         try:
             response = await self.client.get(url)
@@ -118,6 +119,7 @@ class JiraClient:
 
         issue_type = fields.get("issuetype", {}).get("name") if isinstance(fields.get("issuetype"), dict) else None
         status = fields.get("status", {}).get("name") if isinstance(fields.get("status"), dict) else None
+        parent_key = fields.get("parent", {}).get("key") if isinstance(fields.get("parent"), dict) else None
 
         browse_url = f"{self.config.url.rstrip('/')}/browse/{data.get('key', ticket_id)}"
 
@@ -131,7 +133,15 @@ class JiraClient:
             url=browse_url,
             issue_type=issue_type,
             status=status,
+            parent_key=parent_key,
         )
+
+    async def fetch_ticket_with_parent(self, ticket_id: str) -> tuple[JiraTicket | None, JiraTicket | None]:
+        ticket = await self.fetch_ticket(ticket_id)
+        if not ticket or not ticket.parent_key:
+            return ticket, None
+        parent = await self.fetch_ticket(ticket.parent_key)
+        return ticket, parent
 
     async def check_connectivity(self) -> bool:
         try:

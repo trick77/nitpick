@@ -24,6 +24,7 @@ def _jira_response(
     subtasks=None,
     issue_type=None,
     status=None,
+    parent=None,
 ):
     fields = {
         "summary": summary,
@@ -35,6 +36,8 @@ def _jira_response(
         fields["issuetype"] = {"name": issue_type}
     if status is not None:
         fields["status"] = {"name": status}
+    if parent is not None:
+        fields["parent"] = parent
     return {"key": key, "fields": fields}
 
 
@@ -402,3 +405,93 @@ class TestExtractAcceptanceCriteria:
         assert result is not None
         assert "This is not an AK-1 criterion" not in result
         assert "AK-2: Real criterion" in result
+
+
+class TestFetchTicketWithParent:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_subtask_with_parent(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/issue/SEP-101").mock(
+            return_value=httpx.Response(
+                200,
+                json=_jira_response(
+                    key="SEP-101",
+                    summary="Implement subtask",
+                    issue_type="Sub-task",
+                    parent={"key": "SEP-100"},
+                ),
+            )
+        )
+        respx.get("https://jira.example.com/rest/api/2/issue/SEP-100").mock(
+            return_value=httpx.Response(
+                200,
+                json=_jira_response(
+                    key="SEP-100",
+                    summary="Parent story",
+                    description="Full description here",
+                    issue_type="Story",
+                ),
+            )
+        )
+
+        ticket, parent = await jira_client.fetch_ticket_with_parent("SEP-101")
+
+        assert ticket is not None
+        assert ticket.key == "SEP-101"
+        assert ticket.parent_key == "SEP-100"
+        assert parent is not None
+        assert parent.key == "SEP-100"
+        assert parent.title == "Parent story"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_no_parent(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/issue/SEP-200").mock(
+            return_value=httpx.Response(
+                200,
+                json=_jira_response(key="SEP-200", summary="Regular story", issue_type="Story"),
+            )
+        )
+
+        ticket, parent = await jira_client.fetch_ticket_with_parent("SEP-200")
+
+        assert ticket is not None
+        assert ticket.key == "SEP-200"
+        assert parent is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_parent_fetch_fails(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/issue/SEP-301").mock(
+            return_value=httpx.Response(
+                200,
+                json=_jira_response(
+                    key="SEP-301",
+                    summary="Subtask",
+                    issue_type="Sub-task",
+                    parent={"key": "SEP-300"},
+                ),
+            )
+        )
+        respx.get("https://jira.example.com/rest/api/2/issue/SEP-300").mock(
+            return_value=httpx.Response(404)
+        )
+
+        ticket, parent = await jira_client.fetch_ticket_with_parent("SEP-301")
+
+        assert ticket is not None
+        assert ticket.key == "SEP-301"
+        assert ticket.parent_key == "SEP-300"
+        assert parent is None
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_ticket_not_found(self, jira_client):
+        respx.get("https://jira.example.com/rest/api/2/issue/NOPE-1").mock(
+            return_value=httpx.Response(404)
+        )
+
+        ticket, parent = await jira_client.fetch_ticket_with_parent("NOPE-1")
+
+        assert ticket is None
+        assert parent is None

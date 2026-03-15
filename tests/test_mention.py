@@ -122,7 +122,7 @@ class TestHandleMention:
     @pytest.mark.asyncio
     async def test_qa_with_ticket_context(self, mock_bitbucket, mock_copilot):
         mock_jira = AsyncMock()
-        mock_jira.fetch_ticket = AsyncMock(return_value=JiraTicket(
+        ticket = JiraTicket(
             key="SEP-123",
             title="Add login",
             description="Implement login page",
@@ -131,7 +131,9 @@ class TestHandleMention:
             url="https://jira.example.com/browse/SEP-123",
             issue_type="Story",
             status="In Progress",
-        ))
+        )
+        mock_jira.fetch_ticket_with_parent = AsyncMock(return_value=(ticket, None))
+        mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
 
         reviewer = Reviewer(
             mock_bitbucket, mock_copilot,
