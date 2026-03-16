@@ -715,6 +715,10 @@ class TestDedupAndLimit:
         summary = reviewer._build_summary([], review_effort=None)
         assert "📊" not in summary
 
+    def test_build_summary_effort_omitted_when_no_findings(self, reviewer):
+        summary = reviewer._build_summary([], review_effort=5)
+        assert "📊" not in summary
+
     def test_build_summary_security_section(self, reviewer):
         findings = [
             ReviewFinding(file="a.py", line=1, severity="critical", comment="SQL injection vulnerability found"),

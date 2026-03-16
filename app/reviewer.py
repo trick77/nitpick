@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import time
+from pathlib import PurePosixPath
 
 from app.bitbucket import NOERGLER_MARKER, BitbucketClient
 from app.feedback import classify_feedback, random_response
@@ -689,15 +690,15 @@ class Reviewer:
         meta = []
         if findings and security_findings:
             meta.append(f"🔒 **Security:** {self._plural(len(security_findings), 'potential security issue')} detected — review these findings carefully.")
-        if review_effort is not None:
+        if review_effort is not None and findings:
             label = _EFFORT_LABELS.get(review_effort, "")
             meta.append(f"📊 Estimated review effort: **{review_effort}/5** — {label}")
 
         if skipped_files:
-            file_list = ", ".join(f"`{f}`" for f in skipped_files)
+            file_list = ", ".join(f"`{PurePosixPath(f).name}`" for f in skipped_files)
             meta.append(f"⚠️ Not reviewed (too large): {file_list}")
         if content_skipped_files:
-            file_list = ", ".join(f"`{f}`" for f in content_skipped_files)
+            file_list = ", ".join(f"`{PurePosixPath(f).name}`" for f in content_skipped_files)
             meta.append(f"⚠️ Reviewed without full file context (too large): {file_list}")
 
         if agents_md_found:
