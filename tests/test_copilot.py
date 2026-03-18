@@ -1000,3 +1000,160 @@ class TestPostWithRetry:
                 assert mock_sleep.await_count == 3
         finally:
             await client.close()
+
+
+class TestAutoCapTokenBudget:
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_check_connectivity_caps_max_tokens_per_chunk(self, copilot_config, review_config):
+        """When model max_input_tokens < max_tokens_per_chunk, cap to model limit."""
+        copilot_config.max_tokens_per_chunk = 80000
+        models_response = {
+            "data": [
+                {
+                    "id": "openai/gpt-4.1",
+                    "limits": {"max_input_tokens": 4000, "max_output_tokens": 1000},
+                    "rate_limit_tier": "low",
+                    "capabilities": [],
+                },
+            ]
+        }
+        respx.get("https://models.github.ai/catalog/models").mock(
+            return_value=httpx.Response(200, json=models_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            result = await client.check_connectivity()
+            assert result is not None
+            assert copilot_config.max_tokens_per_chunk == 4000
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_check_connectivity_no_cap_when_model_limit_higher(self, copilot_config, review_config):
+        """When model max_input_tokens >= max_tokens_per_chunk, no capping occurs."""
+        copilot_config.max_tokens_per_chunk = 80000
+        models_response = {
+            "data": [
+                {
+                    "id": "openai/gpt-4.1",
+                    "limits": {"max_input_tokens": 1048576, "max_output_tokens": 32768},
+                    "rate_limit_tier": "high",
+                    "capabilities": [],
+                },
+            ]
+        }
+        respx.get("https://models.github.ai/catalog/models").mock(
+            return_value=httpx.Response(200, json=models_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            await client.check_connectivity()
+            assert copilot_config.max_tokens_per_chunk == 80000
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_check_connectivity_warns_low_effective_budget(self, copilot_config, review_config, caplog):
+        """When effective budget after prompt overhead is < 2000, a warning is logged."""
+        copilot_config.max_tokens_per_chunk = 80000
+        models_response = {
+            "data": [
+                {
+                    "id": "openai/gpt-4.1",
+                    "limits": {"max_input_tokens": 2000, "max_output_tokens": 500},
+                    "rate_limit_tier": "low",
+                    "capabilities": [],
+                },
+            ]
+        }
+        respx.get("https://models.github.ai/catalog/models").mock(
+            return_value=httpx.Response(200, json=models_response)
+        )
+
+        client = CopilotClient(copilot_config, review_config)
+        try:
+            import logging
+            with caplog.at_level(logging.WARNING, logger="app.copilot"):
+                await client.check_connectivity()
+            assert copilot_config.max_tokens_per_chunk == 2000
+            assert any("Effective token budget" in msg for msg in caplog.messages)
+        finally:
+            await client.close()
+
+
+class TestParse413TokenLimit:
+    @pytest.mark.asyncio
+    async def test_413_with_max_size_updates_config(self, copilot_config, review_config):
+        """A 413 response body containing 'Max size: N tokens' updates max_tokens_per_chunk."""
+        copilot_config.max_tokens_per_chunk = 80000
+        client = CopilotClient(copilot_config, review_config)
+
+        files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
+
+        async def mock_call_api(prompt: str):
+            response = httpx.Response(
+                413, request=httpx.Request("POST", "https://x"),
+                text="Request too large. Max size: 4,000 tokens.",
+            )
+            raise httpx.HTTPStatusError("too large", request=response.request, response=response)
+
+        client._call_api = mock_call_api
+        try:
+            template = client.prompt_template
+            _, _, _, skipped, _, _ = await client._review_file_group(files, template, depth=0)
+            assert skipped == ["big.py"]
+            assert copilot_config.max_tokens_per_chunk == 4000
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_413_without_max_size_leaves_config_unchanged(self, copilot_config, review_config):
+        """A 413 response without the 'Max size' pattern does not change max_tokens_per_chunk."""
+        copilot_config.max_tokens_per_chunk = 80000
+        client = CopilotClient(copilot_config, review_config)
+
+        files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
+
+        async def mock_call_api(prompt: str):
+            response = httpx.Response(
+                413, request=httpx.Request("POST", "https://x"),
+                text="Request entity too large",
+            )
+            raise httpx.HTTPStatusError("too large", request=response.request, response=response)
+
+        client._call_api = mock_call_api
+        try:
+            template = client.prompt_template
+            await client._review_file_group(files, template, depth=0)
+            assert copilot_config.max_tokens_per_chunk == 80000
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_413_answer_group_parses_limit(self, copilot_config, review_config):
+        """413 in _answer_file_group also parses and updates max_tokens_per_chunk."""
+        copilot_config.max_tokens_per_chunk = 80000
+        client = CopilotClient(copilot_config, review_config)
+
+        files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
+
+        async def mock_call_mention_api(prompt: str):
+            response = httpx.Response(
+                413, request=httpx.Request("POST", "https://x"),
+                text="Max size: 5000 tokens.",
+            )
+            raise httpx.HTTPStatusError("too large", request=response.request, response=response)
+
+        client._call_mention_api = mock_call_mention_api
+        try:
+            template = "{diff}"
+            _, _, _, skipped = await client._answer_file_group(files, template, depth=0)
+            assert skipped == ["big.py"]
+            assert copilot_config.max_tokens_per_chunk == 5000
+        finally:
+            await client.close()

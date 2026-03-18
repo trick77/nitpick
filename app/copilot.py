@@ -411,6 +411,25 @@ class CopilotClient:
                     "Model %s validated. max_input_tokens=%s, max_output_tokens=%s",
                     self.config.model, max_in_fmt, max_out_fmt,
                 )
+                if isinstance(max_in, int) and max_in < self.config.max_tokens_per_chunk:
+                    logger.warning(
+                        "Model %s max_input_tokens (%s) is below configured max_tokens_per_chunk (%s) — capping",
+                        self.config.model, _fmt(max_in), _fmt(self.config.max_tokens_per_chunk),
+                    )
+                    self.config.max_tokens_per_chunk = max_in
+                prompt_overhead = count_tokens(
+                    self.prompt_template
+                    .replace("{files}", "").replace("{tone}", "")
+                    .replace("{repo_instructions}", "").replace("{ticket_context}", "")
+                    .replace("{compliance_instructions}", "")
+                )
+                effective = self.config.max_tokens_per_chunk - prompt_overhead
+                if effective < 2000:
+                    logger.warning(
+                        "Effective token budget for file content is very low (%s tokens). "
+                        "Most files will likely be skipped. Consider using a model with higher token limits.",
+                        _fmt(effective),
+                    )
                 return matched
             logger.warning(
                 "Model %s not found in available models", self.config.model
@@ -601,6 +620,15 @@ class CopilotClient:
             if exc.response.status_code != 413:
                 raise
             logger.warning("413 on mention Q&A: %s", exc.response.text[:500])
+            limit_match = re.search(r"Max size:\s*([\d,]+)\s*tokens", exc.response.text)
+            if limit_match:
+                api_limit = int(limit_match.group(1).replace(",", ""))
+                if api_limit < self.config.max_tokens_per_chunk:
+                    logger.warning(
+                        "Adjusting max_tokens_per_chunk from %s to %s based on 413 response",
+                        _fmt(self.config.max_tokens_per_chunk), _fmt(api_limit),
+                    )
+                    self.config.max_tokens_per_chunk = api_limit
             if len(group) <= 1:
                 file = group[0] if group else None
                 if file is not None and file.content is not None:
@@ -682,6 +710,15 @@ class CopilotClient:
             if exc.response.status_code != 413:
                 raise
             logger.warning("413 response body: %s", exc.response.text[:500])
+            limit_match = re.search(r"Max size:\s*([\d,]+)\s*tokens", exc.response.text)
+            if limit_match:
+                api_limit = int(limit_match.group(1).replace(",", ""))
+                if api_limit < self.config.max_tokens_per_chunk:
+                    logger.warning(
+                        "Adjusting max_tokens_per_chunk from %s to %s based on 413 response",
+                        _fmt(self.config.max_tokens_per_chunk), _fmt(api_limit),
+                    )
+                    self.config.max_tokens_per_chunk = api_limit
             if len(group) <= 1:
                 file = group[0] if group else None
                 if file is not None and file.content is not None:
