@@ -941,18 +941,62 @@ class TestPostWithRetry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_non_429_returned_immediately(self, copilot_config, review_config):
-        """Non-429 responses are returned without retry."""
+    async def test_non_retryable_error_returned_immediately(self, copilot_config, review_config):
+        """Non-retryable error responses (e.g. 400) are returned without retry."""
         client = CopilotClient(copilot_config, review_config)
 
         async def mock_post(url, **kwargs):
-            return httpx.Response(500, request=httpx.Request("POST", url))
+            return httpx.Response(400, request=httpx.Request("POST", url))
 
         client.client.post = mock_post
         try:
             with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 response = await client._post_with_retry("https://api.example.com", json={})
-                assert response.status_code == 500
+                assert response.status_code == 400
                 mock_sleep.assert_not_awaited()
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_502_then_200_retries_and_succeeds(self, copilot_config, review_config):
+        """A 502 followed by a 200 should retry and return the successful response."""
+        client = CopilotClient(copilot_config, review_config)
+        call_count = 0
+
+        async def mock_post(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(502, request=httpx.Request("POST", url))
+            return httpx.Response(200, json={"ok": True}, request=httpx.Request("POST", url))
+
+        client.client.post = mock_post
+        try:
+            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                response = await client._post_with_retry("https://api.example.com", json={})
+                assert response.status_code == 200
+                assert call_count == 2
+                mock_sleep.assert_awaited_once_with(60.0)
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_5xx_max_retries_exhausted(self, copilot_config, review_config):
+        """After max retries on 5xx, the error response is returned."""
+        client = CopilotClient(copilot_config, review_config)
+        call_count = 0
+
+        async def mock_post(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(503, request=httpx.Request("POST", url))
+
+        client.client.post = mock_post
+        try:
+            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                response = await client._post_with_retry("https://api.example.com", json={})
+                assert response.status_code == 503
+                assert call_count == 4  # 1 initial + 3 retries
+                assert mock_sleep.await_count == 3
         finally:
             await client.close()

@@ -331,8 +331,18 @@ class CopilotClient:
                 await asyncio.sleep(default_wait)
                 continue
 
-            if response.status_code != 429:
+            if response.status_code not in (429, 500, 502, 503, 504):
                 return response
+
+            if response.status_code in (500, 502, 503, 504):
+                if attempt >= max_retries:
+                    return response
+                logger.warning(
+                    "%d server error retry %d/%d — waiting %.0fs before next attempt",
+                    response.status_code, attempt + 1, max_retries, default_wait,
+                )
+                await asyncio.sleep(default_wait)
+                continue
 
             retry_after = response.headers.get("retry-after")
             rate_limit_type = response.headers.get("x-ratelimit-type", "unknown")
