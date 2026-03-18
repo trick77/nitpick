@@ -656,7 +656,7 @@ class Reviewer:
         ticket_compliance_check: bool = True,
         change_summary: list[str] | None = None,
     ) -> str:
-        summary = "### 🤖 Review summary\n"
+        summary = "### Review summary\n"
 
         if not findings:
             summary += "- No issues found ✅"
@@ -680,12 +680,12 @@ class Reviewer:
             summary = summary.rstrip("\n")
 
         if change_summary:
-            summary += "\n\n### 🔄 What changed\n"
+            summary += "\n\n### What changed\n"
             summary += "\n".join(f"- {item}" for item in change_summary)
 
         ticket_section = ""
         if ticket:
-            ticket_lines = ["### 🎫 Ticket"]
+            ticket_lines = ["### Ticket"]
             if parent_ticket:
                 ticket_lines.append(f"**[{parent_ticket.key}]({parent_ticket.url})** — {parent_ticket.title}")
                 ticket_lines.append(f"**↳ [{ticket.key}]({ticket.url})** — {ticket.title}")
@@ -731,28 +731,25 @@ class Reviewer:
         else:
             meta.append("Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback. 💡")
 
-        if ticket_section:
-            summary += ticket_section
-
-        if meta:
-            summary += "\n\n### ℹ️ Info\n" + "\n".join(f"- {m}" for m in meta)
-
         if token_usage:
             prompt_t, completion_t = token_usage
             model = self.copilot.config.model
             total = prompt_t + completion_t
-            stats_line = f"_Model: `{model}` · {_fmt(prompt_t)}↑ {_fmt(completion_t)}↓ ({_fmt(total)} total)"
+            stats = f"Model: `{model}` · {_fmt(prompt_t)}↑ {_fmt(completion_t)}↓ ({_fmt(total)} total)"
             if elapsed is not None:
-                stats_line += f" · ⏱️ {elapsed:.1f}s"
-            stats_line += "_"
-            summary += f"\n\n{stats_line}"
+                stats += f" · ⏱️ {elapsed:.1f}s"
+            meta.append(stats)
             if prompt_breakdown:
                 t = prompt_breakdown['template']
                 r = prompt_breakdown['repo_instructions']
                 f = prompt_breakdown['files']
-                summary += (
-                    f"\n_↳ ~{_fmt(t)} template · ~{_fmt(r)} repo · ~{_fmt(f)} files_"
-                )
+                meta.append(f"Tokens: ~{_fmt(t)} template · ~{_fmt(r)} repo · ~{_fmt(f)} file content")
+
+        if ticket_section:
+            summary += ticket_section
+
+        if meta:
+            summary += "\n\n### Info\n" + "\n".join(f"- {m}" for m in meta)
 
         return summary
 

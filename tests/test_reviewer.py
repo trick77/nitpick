@@ -279,7 +279,7 @@ class TestReviewer:
         mock_bitbucket.post_pr_comment.assert_called_once()
 
         summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
-        assert "### 🤖 Review summary" in summary_text
+        assert "### Review summary" in summary_text
         assert "1 warning" in summary_text
 
     @pytest.mark.asyncio
@@ -377,13 +377,13 @@ class TestReviewer:
             ReviewFinding(file="b.py", line=2, severity="warning", comment="warn"),
         ]
         summary = reviewer._build_summary(findings)
-        assert "### 🤖 Review summary" in summary
+        assert "### Review summary" in summary
         assert "- 1 critical ❌" in summary
         assert "- 1 warning ⚠️" in summary
 
     def test_build_summary_empty(self, reviewer):
         summary = reviewer._build_summary([])
-        assert "### 🤖 Review summary" in summary
+        assert "### Review summary" in summary
         assert "- No issues found ✅" in summary
 
     @pytest.mark.asyncio
@@ -621,7 +621,7 @@ class TestDedupAndLimit:
         )
         assert "~500 template" in summary
         assert "~200 repo" in summary
-        assert "~7'258 files" in summary
+        assert "~7'258 file content" in summary
 
     def test_build_summary_prompt_breakdown_without_token_usage(self, reviewer):
         findings = [
@@ -751,7 +751,7 @@ class TestDedupAndLimit:
         summary = reviewer._build_summary(
             [], change_summary=["Added retry logic", "Replaced sync with async I/O"]
         )
-        assert "### 🔄 What changed" in summary
+        assert "### What changed" in summary
         assert "- Added retry logic" in summary
         assert "- Replaced sync with async I/O" in summary
 
@@ -918,7 +918,7 @@ class TestBuildSummaryWithTicket:
             url="https://jira.example.com/browse/SEP-22888",
         )
         summary = reviewer._build_summary([], ticket=ticket)
-        assert "### 🎫 Ticket" in summary
+        assert "### Ticket" in summary
         assert "**[SEP-22888](https://jira.example.com/browse/SEP-22888)**" in summary
 
     def test_build_summary_compliance_all_met(self, reviewer):
@@ -1006,7 +1006,7 @@ class TestBuildSummaryWithTicket:
     def test_build_summary_jira_enabled_no_ticket(self, reviewer):
         summary = reviewer._build_summary([], jira_enabled=True)
         assert "No ticket found in branch name or PR title ℹ️" in summary
-        assert "### 🎫 Ticket" not in summary
+        assert "### Ticket" not in summary
 
     @pytest.mark.asyncio
     async def test_fetch_ticket_context_includes_type_and_status(self, mock_bitbucket, mock_copilot):
@@ -1146,7 +1146,7 @@ class TestReviewWithJira:
         assert "SEP-124" in call_kwargs["ticket_context"]
 
         summary_text = mock_bitbucket.update_pr_comment.call_args[0][5] if mock_bitbucket.update_pr_comment.called else mock_bitbucket.post_pr_comment.call_args[0][3]
-        assert "### 🎫 Ticket" in summary_text
+        assert "### Ticket" in summary_text
         assert "[SEP-123]" in summary_text
         assert "↳" in summary_text
         assert "SEP-124" in summary_text

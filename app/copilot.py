@@ -514,7 +514,7 @@ class CopilotClient:
 
         total = total_prompt_tokens + total_completion_tokens
         logger.info(
-            "Review complete: %d prompt + %d completion = %d total tokens (%d group%s)",
+            "Review complete: %d in + %d out = %d total tokens (%d chunk%s)",
             total_prompt_tokens,
             total_completion_tokens,
             total,
@@ -590,7 +590,7 @@ class CopilotClient:
 
         total = total_prompt_tokens + total_completion_tokens
         logger.info(
-            "Mention Q&A complete: %d prompt + %d completion = %d total tokens (%d group%s)",
+            "Mention Q&A complete: %d in + %d out = %d total tokens (%d chunk%s)",
             total_prompt_tokens, total_completion_tokens, total,
             len(groups), "" if len(groups) == 1 else "s",
         )
