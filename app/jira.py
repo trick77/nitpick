@@ -1,5 +1,6 @@
 import logging
 import re
+import ssl
 from dataclasses import dataclass, field
 
 import httpx
@@ -76,6 +77,7 @@ class JiraClient:
                 "Accept": "application/json",
             },
             timeout=30.0,
+            verify=ssl.create_default_context(),
         )
 
     async def fetch_ticket(self, ticket_id: str) -> JiraTicket | None:
