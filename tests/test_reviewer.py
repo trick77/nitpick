@@ -1391,7 +1391,7 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_comments.return_value = [
             {
                 "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n- No issues found ✅\n\n<!-- noergler:last_reviewed_commit=oldcommit123 -->\n\n{NOERGLER_MARKER}",
+                "text": f"### Review summary\n- No issues found ✅\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
             },
         ]
 
@@ -1402,7 +1402,7 @@ class TestIncrementalReview:
         await rev.review_pull_request(payload)
 
         mock_bitbucket.fetch_commit_diff.assert_called_once_with(
-            "PROJ", "my-repo", "oldcommit123", "abc123"
+            "PROJ", "my-repo", "aabbccdd1234", "abc123"
         )
         # Should NOT have called fetch_pr_diff since incremental succeeded
         mock_bitbucket.fetch_pr_diff.assert_not_called()
@@ -1433,7 +1433,7 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_comments.return_value = [
             {
                 "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=oldcommit123 -->\n\n{NOERGLER_MARKER}",
+                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
             },
         ]
         mock_bitbucket.fetch_commit_diff.side_effect = Exception("404 Not Found")
@@ -1454,7 +1454,7 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_comments.return_value = [
             {
                 "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=oldcommit123 -->\n\n{NOERGLER_MARKER}",
+                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
             },
         ]
         mock_bitbucket.fetch_commit_diff.return_value = "   \n"
@@ -1473,7 +1473,7 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_comments.return_value = [
             {
                 "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=oldcommit123 -->\n\n{NOERGLER_MARKER}",
+                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
             },
         ]
 
@@ -1502,7 +1502,7 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_comments.return_value = [
             {
                 "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=oldcommit123 -->\n\n{NOERGLER_MARKER}",
+                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
             },
         ]
 
@@ -1514,7 +1514,7 @@ class TestIncrementalReview:
 
         # Summary should be updated (existing summary found)
         update_call = mock_bitbucket.update_pr_comment.call_args
-        summary_text = update_call[0][4]  # text is the 5th positional arg
+        summary_text = update_call[0][5]  # text is the 6th positional arg
         assert "incremental update" in summary_text
-        assert "oldcommit12" in summary_text
+        assert "aabbccdd12" in summary_text
         assert "abc123" in summary_text
