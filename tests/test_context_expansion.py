@@ -6,7 +6,7 @@ from app.context_expansion import (
     find_enclosing_scope_line,
     parse_hunks,
 )
-from app.copilot import FileReviewData
+from app.llm_client import FileReviewData
 
 
 class TestParseHunks:

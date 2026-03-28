@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from app.copilot import FileReviewData, is_deleted
+from app.llm_client import FileReviewData, is_deleted
 
 logger = logging.getLogger(__name__)
 

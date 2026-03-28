@@ -19,7 +19,7 @@ def _fake_count_tokens(text: str) -> int:
 @pytest.fixture(autouse=True)
 def _mock_count_tokens():
     with (
-        patch("app.copilot.count_tokens", side_effect=_fake_count_tokens),
+        patch("app.llm_client.count_tokens", side_effect=_fake_count_tokens),
         patch("app.reviewer.count_tokens", side_effect=_fake_count_tokens),
     ):
         yield

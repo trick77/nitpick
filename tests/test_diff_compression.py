@@ -1,4 +1,4 @@
-from app.copilot import FileReviewData
+from app.llm_client import FileReviewData
 from app.diff_compression import (
     CompressionResult,
     compress_for_large_pr,

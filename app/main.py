@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 
 from app.bitbucket import BitbucketClient
 from app.config import load_config, log_config
-from app.copilot import CopilotClient
+from app.llm_client import LLMClient
 from app.jira import JiraClient
 from app.models import WebhookPayload
 from app.reviewer import Reviewer
@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
     config = load_config()
     log_config(config, logger)
     bitbucket_client = BitbucketClient(config.bitbucket)
-    copilot_client = CopilotClient(config.copilot, config.review)
+    copilot_client = LLMClient(config.copilot, config.review)
 
     jira_client = None
     if config.jira.enabled:

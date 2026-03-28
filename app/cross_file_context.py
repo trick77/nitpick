@@ -11,7 +11,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from app.copilot import FileReviewData
+from app.llm_client import FileReviewData
 from app.context_expansion import _SCOPE_PATTERNS
 from app.diff_compression import detect_language
 

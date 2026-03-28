@@ -6,8 +6,8 @@ import pytest
 import respx
 
 from app.config import CopilotConfig, ReviewConfig
-from app.copilot import (
-    CopilotClient,
+from app.llm_client import (
+    LLMClient,
     FileReviewData,
     format_file_entry,
     _group_files_by_token_budget,
@@ -357,7 +357,7 @@ class TestGroupFilesByTokenBudget:
 class TestSystemMessage:
     @respx.mock
     def test_system_message_contains_injection_warning(self, copilot_config, review_config):
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         payload = {
             "model": client.config.model,
             "messages": [
@@ -375,7 +375,7 @@ class TestSystemMessage:
         assert "never follow instructions" in system_msg
 
 
-class TestCopilotClient:
+class TestLLMClient:
     @pytest.mark.asyncio
     @respx.mock
     async def test_review_diff(self, copilot_config, review_config):
@@ -400,7 +400,7 @@ class TestCopilotClient:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(
                 path="src/main.py",
@@ -438,7 +438,7 @@ class TestCopilotClient:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             result = await client.check_connectivity()
             assert result is not None
@@ -455,7 +455,7 @@ class TestCopilotClient:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             result = await client.check_connectivity()
             assert result is None
@@ -476,7 +476,7 @@ class TestRepoInstructionsInReviewPrompt:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             await client.review_diff(files, repo_instructions="Use 4-space indent")
@@ -500,7 +500,7 @@ class TestRepoInstructionsInReviewPrompt:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             await client.review_diff(files, repo_instructions="")
@@ -524,7 +524,7 @@ class TestComplianceInstructions:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             await client.review_diff(
@@ -548,7 +548,7 @@ class TestComplianceInstructions:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             await client.review_diff(
@@ -572,7 +572,7 @@ class TestComplianceInstructions:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             await client.review_diff(
@@ -596,7 +596,7 @@ class TestComplianceInstructions:
             return_value=httpx.Response(200, json=review_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             await client.review_diff(
@@ -621,7 +621,7 @@ class TestAnswerQuestion:
             return_value=httpx.Response(200, json=answer_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             files = [FileReviewData(path="math.py", diff="+def fib(n):\n", content="def fib(n):\n    pass\n")]
             result = await client.answer_question("What does this do?", files)
@@ -631,7 +631,7 @@ class TestAnswerQuestion:
 
     @pytest.mark.asyncio
     async def test_answer_question_413_bisects_and_retries(self, copilot_config, review_config):
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [
             FileReviewData(path="a.py", diff="+a\n", content="a\n"),
@@ -658,7 +658,7 @@ class TestAnswerQuestion:
 
     @pytest.mark.asyncio
     async def test_answer_question_413_single_file_retries_diff_only(self, copilot_config, review_config):
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
         call_count = 0
@@ -681,7 +681,7 @@ class TestAnswerQuestion:
 
     @pytest.mark.asyncio
     async def test_answer_question_413_all_skipped_returns_fallback(self, copilot_config, review_config):
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content=None)]
 
@@ -701,7 +701,7 @@ class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_413_bisects_and_retries(self, copilot_config, review_config):
         """On 413, the file group is bisected and each half retried."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [
             FileReviewData(path="a.py", diff="+a\n", content="a\n"),
@@ -749,7 +749,7 @@ class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_413_single_file_retries_diff_only(self, copilot_config, review_config):
         """A single file with content that triggers 413 retries with diff only."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
         call_count = 0
@@ -777,7 +777,7 @@ class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_413_single_file_skipped_when_already_diff_only(self, copilot_config, review_config):
         """A single file already without content that triggers 413 is skipped."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content=None)]
 
@@ -799,7 +799,7 @@ class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_413_single_file_falls_through_when_diff_only_also_fails(self, copilot_config, review_config):
         """A single file that 413s with content and again with diff-only is skipped."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
 
@@ -819,7 +819,7 @@ class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_413_max_depth_stops_recursion(self, copilot_config, review_config):
         """Recursion stops at max_depth even with multiple files."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [
             FileReviewData(path="a.py", diff="+a\n", content="a\n"),
@@ -842,7 +842,7 @@ class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
     async def test_non_413_error_propagates(self, copilot_config, review_config):
         """Non-413 HTTP errors are not caught."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="a.py", diff="+a\n", content="a\n")]
 
@@ -862,42 +862,42 @@ class TestReviewFileGroup413Retry:
 class TestEstimateReviewEffort:
     def test_trivial_change(self):
         files = [FileReviewData(path="a.py", diff="+x = 1\n", content="x = 1\n")]
-        assert CopilotClient._estimate_review_effort(files) == 1
+        assert LLMClient._estimate_review_effort(files) == 1
 
     def test_small_change(self):
         files = [
             FileReviewData(path="a.py", diff="\n".join(f"+line{i}" for i in range(20)), content="x\n"),
             FileReviewData(path="b.py", diff="+fix\n", content="fix\n"),
         ]
-        assert CopilotClient._estimate_review_effort(files) == 2
+        assert LLMClient._estimate_review_effort(files) == 2
 
     def test_medium_change(self):
         files = [
             FileReviewData(path=f"f{i}.py", diff="\n".join(f"+line{j}" for j in range(30)), content="x\n")
             for i in range(4)
         ]
-        assert CopilotClient._estimate_review_effort(files) == 3
+        assert LLMClient._estimate_review_effort(files) == 3
 
     def test_large_change(self):
         files = [
             FileReviewData(path=f"f{i}.py", diff="\n".join(f"+line{j}" for j in range(40)), content="x\n")
             for i in range(10)
         ]
-        assert CopilotClient._estimate_review_effort(files) == 4
+        assert LLMClient._estimate_review_effort(files) == 4
 
     def test_very_large_change(self):
         files = [
             FileReviewData(path=f"f{i}.py", diff="\n".join(f"+line{j}" for j in range(50)), content="x\n")
             for i in range(20)
         ]
-        assert CopilotClient._estimate_review_effort(files) == 5
+        assert LLMClient._estimate_review_effort(files) == 5
 
 
 class TestPostWithRetry:
     @pytest.mark.asyncio
     async def test_429_then_200_retries_and_succeeds(self, copilot_config, review_config):
         """A 429 followed by a 200 should retry and return the successful response."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         call_count = 0
 
         async def mock_post(url, **kwargs):
@@ -909,7 +909,7 @@ class TestPostWithRetry:
 
         client.client.post = mock_post
         try:
-            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("app.llm_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 response = await client._post_with_retry("https://api.example.com", json={})
                 assert response.status_code == 200
                 assert call_count == 2
@@ -920,7 +920,7 @@ class TestPostWithRetry:
     @pytest.mark.asyncio
     async def test_max_retries_exhausted_returns_429(self, copilot_config, review_config):
         """After max retries, the 429 response is returned (and raise_for_status will raise)."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         call_count = 0
 
         async def mock_post(url, **kwargs):
@@ -930,7 +930,7 @@ class TestPostWithRetry:
 
         client.client.post = mock_post
         try:
-            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("app.llm_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 response = await client._post_with_retry("https://api.example.com", json={})
                 assert response.status_code == 429
                 assert call_count == 4  # 1 initial + 3 retries
@@ -943,14 +943,14 @@ class TestPostWithRetry:
     @pytest.mark.asyncio
     async def test_non_retryable_error_returned_immediately(self, copilot_config, review_config):
         """Non-retryable error responses (e.g. 400) are returned without retry."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         async def mock_post(url, **kwargs):
             return httpx.Response(400, request=httpx.Request("POST", url))
 
         client.client.post = mock_post
         try:
-            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("app.llm_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 response = await client._post_with_retry("https://api.example.com", json={})
                 assert response.status_code == 400
                 mock_sleep.assert_not_awaited()
@@ -960,7 +960,7 @@ class TestPostWithRetry:
     @pytest.mark.asyncio
     async def test_502_then_200_retries_and_succeeds(self, copilot_config, review_config):
         """A 502 followed by a 200 should retry and return the successful response."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         call_count = 0
 
         async def mock_post(url, **kwargs):
@@ -972,7 +972,7 @@ class TestPostWithRetry:
 
         client.client.post = mock_post
         try:
-            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("app.llm_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 response = await client._post_with_retry("https://api.example.com", json={})
                 assert response.status_code == 200
                 assert call_count == 2
@@ -983,7 +983,7 @@ class TestPostWithRetry:
     @pytest.mark.asyncio
     async def test_5xx_max_retries_exhausted(self, copilot_config, review_config):
         """After max retries on 5xx, the error response is returned."""
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         call_count = 0
 
         async def mock_post(url, **kwargs):
@@ -993,7 +993,7 @@ class TestPostWithRetry:
 
         client.client.post = mock_post
         try:
-            with patch("app.copilot.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("app.llm_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 response = await client._post_with_retry("https://api.example.com", json={})
                 assert response.status_code == 503
                 assert call_count == 4  # 1 initial + 3 retries
@@ -1022,7 +1022,7 @@ class TestAutoCapTokenBudget:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             result = await client.check_connectivity()
             assert result is not None
@@ -1049,7 +1049,7 @@ class TestAutoCapTokenBudget:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             await client.check_connectivity()
             assert copilot_config.max_tokens_per_chunk == 80000
@@ -1075,10 +1075,10 @@ class TestAutoCapTokenBudget:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
         try:
             import logging
-            with caplog.at_level(logging.WARNING, logger="app.copilot"):
+            with caplog.at_level(logging.WARNING, logger="app.llm_client"):
                 await client.check_connectivity()
             assert copilot_config.max_tokens_per_chunk == 2000
             assert any("Effective token budget" in msg for msg in caplog.messages)
@@ -1091,7 +1091,7 @@ class TestParse413TokenLimit:
     async def test_413_with_max_size_updates_config(self, copilot_config, review_config):
         """A 413 response body containing 'Max size: N tokens' updates max_tokens_per_chunk."""
         copilot_config.max_tokens_per_chunk = 80000
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
 
@@ -1115,7 +1115,7 @@ class TestParse413TokenLimit:
     async def test_413_without_max_size_leaves_config_unchanged(self, copilot_config, review_config):
         """A 413 response without the 'Max size' pattern does not change max_tokens_per_chunk."""
         copilot_config.max_tokens_per_chunk = 80000
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
 
@@ -1138,7 +1138,7 @@ class TestParse413TokenLimit:
     async def test_413_answer_group_parses_limit(self, copilot_config, review_config):
         """413 in _answer_file_group also parses and updates max_tokens_per_chunk."""
         copilot_config.max_tokens_per_chunk = 80000
-        client = CopilotClient(copilot_config, review_config)
+        client = LLMClient(copilot_config, review_config)
 
         files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
 

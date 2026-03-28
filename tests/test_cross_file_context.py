@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.copilot import FileReviewData
+from app.llm_client import FileReviewData
 from app.cross_file_context import (
     CrossFileRelationship,
     SymbolReference,

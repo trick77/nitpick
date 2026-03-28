@@ -2,7 +2,7 @@ import logging
 import re
 from dataclasses import dataclass
 
-from app.copilot import FileReviewData
+from app.llm_client import FileReviewData
 from app.diff_compression import detect_language
 
 logger = logging.getLogger(__name__)

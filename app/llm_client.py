@@ -292,7 +292,7 @@ COMPLIANCE_INSTRUCTIONS = (
 )
 
 
-class CopilotClient:
+class LLMClient:
     def __init__(self, config: CopilotConfig, review_config: ReviewConfig):
         self.config = config
         self.review_config = review_config
@@ -460,7 +460,7 @@ class CopilotClient:
         ticket_context: str = "",
         ticket_compliance_check: bool = True,
         cross_file_context: str = "",
-    ) -> "CopilotClient.ReviewResult":
+    ) -> "LLMClient.ReviewResult":
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.prompt_template.replace("{tone}", tone_text)
         template = template.replace("{repo_instructions}", repo_instructions)
@@ -527,7 +527,7 @@ class CopilotClient:
 
         review_effort = self._estimate_review_effort(files)
 
-        return CopilotClient.ReviewResult(
+        return LLMClient.ReviewResult(
             findings=all_findings,
             skipped_files=skipped_files,
             prompt_tokens=total_prompt_tokens,

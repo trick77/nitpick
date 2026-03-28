@@ -7,8 +7,8 @@ from pathlib import PurePosixPath
 
 from app.bitbucket import NOERGLER_MARKER, BitbucketClient
 from app.feedback import classify_feedback, random_response
-from app.copilot import (
-    CopilotClient,
+from app.llm_client import (
+    LLMClient,
     FileReviewData,
     count_tokens,
     extract_path,
@@ -72,7 +72,7 @@ class Reviewer:
     def __init__(
         self,
         bitbucket: BitbucketClient,
-        copilot: CopilotClient,
+        copilot: LLMClient,
         review_config: ReviewConfig,
         jira: JiraClient | None = None,
         server_config: ServerConfig | None = None,

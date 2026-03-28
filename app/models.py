@@ -59,5 +59,6 @@ class ReviewFinding(BaseModel):
     file: str
     line: int
     severity: str  # "critical", "warning"
+    confidence: int | None = None
     comment: str
     suggestion: str | None = None

@@ -4,7 +4,7 @@ import pytest
 
 from app.bitbucket import NOERGLER_MARKER
 from app.config import ReviewConfig
-from app.copilot import CopilotClient, FileReviewData
+from app.llm_client import LLMClient, FileReviewData
 from app.jira import JiraClient, JiraTicket
 from app.models import ReviewFinding, WebhookPayload
 from app.reviewer import Reviewer, _count_diff_lines, _deduplicate, _extract_last_reviewed_commit, _sort_and_limit
@@ -233,7 +233,7 @@ def mock_bitbucket():
 
 
 def _make_review_result(findings=None, skipped_files=None, review_effort=1):
-    return CopilotClient.ReviewResult(
+    return LLMClient.ReviewResult(
         findings=findings or [],
         skipped_files=skipped_files or [],
         prompt_tokens=100,
