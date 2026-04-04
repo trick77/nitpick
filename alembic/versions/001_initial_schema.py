@@ -99,6 +99,16 @@ def upgrade() -> None:
         )
     """)
 
+    op.execute("""
+        CREATE INDEX idx_review_statistics_pr
+        ON review_statistics (project_key, repo_slug, pr_id)
+    """)
+
+    op.execute("""
+        CREATE INDEX idx_feedback_events_pr
+        ON feedback_events (project_key, repo_slug, pr_id)
+    """)
+
 
 def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS feedback_events")

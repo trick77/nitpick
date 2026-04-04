@@ -64,7 +64,7 @@ async def _safe_db(coro, fallback=None):
 
 def _is_bot_comment(comment: dict, bot_username: str | None) -> bool:
     """Identify a bot comment by author slug (preferred) or legacy marker (backward compat)."""
-    if bot_username and isinstance(bot_username, str) and comment.get("author_slug") == bot_username:
+    if bot_username and comment.get("author_slug") == bot_username:
         return True
     return NOERGLER_MARKER in comment.get("text", "")
 
@@ -1038,7 +1038,7 @@ def _extract_last_reviewed_commit(existing_comments: list[dict]) -> str | None:
     """Find the last-reviewed commit hash from the summary comment metadata (fallback)."""
     for comment in existing_comments:
         text = comment.get("text", "")
-        if (NOERGLER_MARKER in text or comment.get("author_slug")) and "Review summary" in text:
+        if _is_bot_comment(comment, None) and "Review summary" in text:
             match = _LAST_REVIEWED_RE.search(text)
             if match:
                 return match.group(1)

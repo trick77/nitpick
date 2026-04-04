@@ -89,6 +89,7 @@ _SECRET_FIELDS = {
     "bitbucket": {"token", "webhook_secret"},
     "copilot": {"github_token"},
     "jira": {"token"},
+    "database": {"url"},
 }
 
 
