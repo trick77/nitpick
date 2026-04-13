@@ -1,6 +1,6 @@
 import logging
 
-from app.config import AppConfig, BitbucketConfig, CopilotConfig, DatabaseConfig, JiraConfig, ReviewConfig, ServerConfig, load_config, log_config
+from app.config import AppConfig, BitbucketConfig, LLMConfig, DatabaseConfig, JiraConfig, ReviewConfig, ServerConfig, load_config, log_config
 
 
 def _make_config():
@@ -11,7 +11,7 @@ def _make_config():
             webhook_secret="secret-webhook",
             username="bot-user",
         ),
-        copilot=CopilotConfig(
+        llm=LLMConfig(
             model="openai/gpt-4.1",
             github_token="ghp_secret123",
             api_url="https://models.github.ai/inference/chat/completions",
@@ -53,7 +53,7 @@ def test_log_config_masks_secrets(caplog):
 
     # Section headers must appear
     assert "[config.bitbucket]" in text
-    assert "[config.copilot]" in text
+    assert "[config.llm]" in text
     assert "[config.review]" in text
     assert "[config.jira]" in text
     assert "[config.server]" in text

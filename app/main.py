@@ -18,6 +18,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
 
 _REVIEW_EVENT_KEYS = {"pr:opened", "pr:from_ref_updated"}
 
@@ -41,19 +42,19 @@ def _unify_uvicorn_logging() -> None:
 config = None
 reviewer = None
 bitbucket_client = None
-copilot_client = None
+llm_client = None
 jira_client = None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global config, reviewer, bitbucket_client, copilot_client, jira_client
+    global config, reviewer, bitbucket_client, llm_client, jira_client
 
     _unify_uvicorn_logging()
     config = load_config()
     log_config(config, logger)
     bitbucket_client = BitbucketClient(config.bitbucket)
-    copilot_client = LLMClient(config.copilot, config.review)
+    llm_client = LLMClient(config.llm, config.review)
 
     jira_client = JiraClient(config.jira)
 
@@ -80,7 +81,7 @@ async def lifespan(_app: FastAPI):
         checks["Jira"] = str(exc)
 
     try:
-        await copilot_client.check_connectivity()
+        await llm_client.check_connectivity()
         checks["LLM"] = None
     except Exception as exc:
         checks["LLM"] = str(exc)
@@ -96,24 +97,24 @@ async def lifespan(_app: FastAPI):
         if db_pool:
             await close_pool()
         await bitbucket_client.close()
-        await copilot_client.close()
+        await llm_client.close()
         await jira_client.close()
         raise RuntimeError(
             f"Startup aborted — {len(failed)} connection(s) failed: {', '.join(failed)}"
         )
 
     reviewer = Reviewer(
-        bitbucket_client, copilot_client, config.review,
+        bitbucket_client, llm_client, config.review,
         jira=jira_client,
         server_config=config.server,
         db_pool=db_pool,
     )
-    logger.info("Bridge service started, model=%s, api_url=%s", config.copilot.model, config.copilot.api_url)
+    logger.info("Bridge service started, model=%s, api_url=%s", config.llm.model, config.llm.api_url)
 
     yield
 
     await bitbucket_client.close()
-    await copilot_client.close()
+    await llm_client.close()
     await jira_client.close()
     await close_pool()
 

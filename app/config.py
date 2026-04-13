@@ -11,11 +11,16 @@ class BitbucketConfig(BaseModel):
     username: str
 
 
-class CopilotConfig(BaseModel):
+class LLMConfig(BaseModel):
     model: str = "openai/gpt-4.1"
     github_token: str
-    api_url: str = "https://models.github.ai/inference/chat/completions"
+    api_url: str = "https://models.github.ai/inference"
     max_tokens_per_chunk: int = 80000
+
+    @field_validator("api_url", mode="after")
+    @classmethod
+    def strip_chat_completions_suffix(cls, v: str) -> str:
+        return v.removesuffix("/chat/completions")
 
 
 class ReviewConfig(BaseModel):
@@ -64,7 +69,7 @@ class DatabaseConfig(BaseModel):
 
 class AppConfig(BaseModel):
     bitbucket: BitbucketConfig
-    copilot: CopilotConfig
+    llm: LLMConfig
     review: ReviewConfig = ReviewConfig()
     jira: JiraConfig
     server: ServerConfig = ServerConfig()
@@ -80,14 +85,14 @@ def _env(name: str, default: str | None = None) -> str:
 
 _SECRET_FIELDS = {
     "bitbucket": {"token", "webhook_secret"},
-    "copilot": {"github_token"},
+    "llm": {"github_token"},
     "jira": {"token"},
     "database": {"url"},
 }
 
 
 def log_config(config: AppConfig, log: logging.Logger) -> None:
-    for section_name in ("bitbucket", "copilot", "review", "jira", "server", "database"):
+    for section_name in ("bitbucket", "llm", "review", "jira", "server", "database"):
         section = getattr(config, section_name)
         secrets = _SECRET_FIELDS.get(section_name, set())
         log.info("[config.%s]", section_name)
@@ -105,11 +110,11 @@ def load_config() -> AppConfig:
             webhook_secret=_env("BITBUCKET_WEBHOOK_SECRET"),
             username=_env("BITBUCKET_USERNAME"),
         ),
-        copilot=CopilotConfig(
-            model=_env("COPILOT_MODEL", "openai/gpt-4.1"),
+        llm=LLMConfig(
+            model=_env("OPENAI_MODEL", "openai/gpt-4.1"),
             github_token=_env("GITHUB_TOKEN"),
-            api_url=_env("COPILOT_API_URL", "https://models.github.ai/inference/chat/completions"),
-            max_tokens_per_chunk=int(_env("COPILOT_MAX_TOKENS_PER_CHUNK", "80000")),
+            api_url=_env("OPENAI_API_URL", "https://models.github.ai/inference"),
+            max_tokens_per_chunk=int(_env("OPENAI_MAX_TOKENS_PER_CHUNK", "80000")),
         ),
         review=ReviewConfig(
             auto_review_authors=_env("REVIEW_AUTO_REVIEW_AUTHORS", ""),

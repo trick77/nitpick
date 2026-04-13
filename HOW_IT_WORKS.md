@@ -87,7 +87,7 @@ If found, it requests an incremental diff from Bitbucket's compare API (`/compar
 
 ## 3. Diff fetch and file splitting
 
-**Files:** `app/bitbucket.py`, `app/copilot.py`
+**Files:** `app/bitbucket.py`, `app/llm_client.py`
 
 The raw diff (either full PR diff or incremental) is split into per-file chunks using `diff --git` boundaries. Each file chunk is then filtered:
 
@@ -227,7 +227,7 @@ Within each group, larger files (by token count) are prioritized — they likely
 
 ## 8. What gets sent to the AI model
 
-**File:** `app/copilot.py`
+**File:** `app/llm_client.py`
 
 The final prompt sent to the model is assembled from the template (`prompts/review.txt`) with these placeholders filled:
 
@@ -271,7 +271,7 @@ If the API returns 413, noergler:
 
 ## 9. AI response parsing
 
-**File:** `app/copilot.py`
+**File:** `app/llm_client.py`
 
 The model responds with JSON containing:
 
@@ -370,7 +370,7 @@ if not user_id:
 
 ## 11. Mention Q&A
 
-**Files:** `app/reviewer.py`, `app/copilot.py`
+**Files:** `app/reviewer.py`, `app/llm_client.py`
 
 When a developer mentions `@noergler` with a question in a PR comment, the Q&A pipeline:
 

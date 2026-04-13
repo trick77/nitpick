@@ -57,7 +57,7 @@ def mock_bitbucket():
 
 
 @pytest.fixture
-def mock_copilot():
+def mock_llm():
     client = AsyncMock()
     client.config.model = "openai/gpt-4.1"
     client.config.max_tokens_per_chunk = 80000
@@ -68,9 +68,9 @@ def mock_copilot():
 
 
 @pytest.fixture
-def reviewer(mock_bitbucket, mock_copilot):
+def reviewer(mock_bitbucket, mock_llm):
     return Reviewer(
-        mock_bitbucket, mock_copilot,
+        mock_bitbucket, mock_llm,
         ReviewConfig(auto_review_authors=["pr-author"]),
         db_pool=AsyncMock(),
     )
@@ -78,51 +78,51 @@ def reviewer(mock_bitbucket, mock_copilot):
 
 class TestHandleMention:
     @pytest.mark.asyncio
-    async def test_qa_path(self, reviewer, mock_bitbucket, mock_copilot):
+    async def test_qa_path(self, reviewer, mock_bitbucket, mock_llm):
         payload = _make_mention_payload("@noergler explain this")
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_called_once()
-        call_args = mock_copilot.answer_question.call_args
+        mock_llm.answer_question.assert_called_once()
+        call_args = mock_llm.answer_question.call_args
         assert call_args[0][0] == "explain this"
         mock_bitbucket.reply_to_comment.assert_called_once()
         assert mock_bitbucket.reply_to_comment.call_args[0][3] == 100
 
     @pytest.mark.asyncio
-    async def test_empty_mention_triggers_review(self, reviewer, mock_copilot):
+    async def test_empty_mention_triggers_review(self, reviewer, mock_llm):
         payload = _make_mention_payload("@noergler")
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_not_called()
-        mock_copilot.review_diff.assert_called_once()
+        mock_llm.answer_question.assert_not_called()
+        mock_llm.review_diff.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_review_keyword_triggers_review(self, reviewer, mock_copilot):
+    async def test_review_keyword_triggers_review(self, reviewer, mock_llm):
         payload = _make_mention_payload("@noergler review this")
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_not_called()
-        mock_copilot.review_diff.assert_called_once()
+        mock_llm.answer_question.assert_not_called()
+        mock_llm.review_diff.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_self_loop_ignored(self, reviewer, mock_bitbucket, mock_copilot):
+    async def test_self_loop_ignored(self, reviewer, mock_bitbucket, mock_llm):
         payload = _make_mention_payload(f"@noergler some text\n\n{NOERGLER_MARKER}")
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_not_called()
-        mock_copilot.review_diff.assert_not_called()
+        mock_llm.answer_question.assert_not_called()
+        mock_llm.review_diff.assert_not_called()
         mock_bitbucket.reply_to_comment.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_closed_pr_ignored(self, reviewer, mock_bitbucket, mock_copilot):
+    async def test_closed_pr_ignored(self, reviewer, mock_bitbucket, mock_llm):
         payload = _make_mention_payload("@noergler explain this", pr_state="MERGED")
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_not_called()
+        mock_llm.answer_question.assert_not_called()
         mock_bitbucket.reply_to_comment.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_qa_with_ticket_context(self, mock_bitbucket, mock_copilot):
+    async def test_qa_with_ticket_context(self, mock_bitbucket, mock_llm):
         mock_jira = AsyncMock()
         ticket = JiraTicket(
             key="SEP-123",
@@ -138,7 +138,7 @@ class TestHandleMention:
         mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
 
         reviewer = Reviewer(
-            mock_bitbucket, mock_copilot,
+            mock_bitbucket, mock_llm,
             ReviewConfig(auto_review_authors=["pr-author"]),
             jira=mock_jira,
             db_pool=AsyncMock(),
@@ -148,22 +148,22 @@ class TestHandleMention:
         payload.pullRequest.fromRef.displayId = "feature/SEP-123-login"
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_called_once()
-        call_kwargs = mock_copilot.answer_question.call_args[1]
+        mock_llm.answer_question.assert_called_once()
+        call_kwargs = mock_llm.answer_question.call_args[1]
         assert "SEP-123" in call_kwargs["ticket_context"]
         assert "Add login" in call_kwargs["ticket_context"]
 
     @pytest.mark.asyncio
-    async def test_qa_without_jira(self, reviewer, mock_copilot):
+    async def test_qa_without_jira(self, reviewer, mock_llm):
         payload = _make_mention_payload("@noergler explain this")
         await reviewer.handle_mention(payload)
 
-        mock_copilot.answer_question.assert_called_once()
-        call_kwargs = mock_copilot.answer_question.call_args[1]
+        mock_llm.answer_question.assert_called_once()
+        call_kwargs = mock_llm.answer_question.call_args[1]
         assert call_kwargs["ticket_context"] == ""
 
     @pytest.mark.asyncio
-    async def test_no_comment_returns_without_error(self, reviewer, mock_copilot):
+    async def test_no_comment_returns_without_error(self, reviewer, mock_llm):
         payload = WebhookPayload(**{
             "eventKey": "pr:comment:added",
             "pullRequest": {
@@ -185,7 +185,7 @@ class TestHandleMention:
             },
         })
         await reviewer.handle_mention(payload)
-        mock_copilot.answer_question.assert_not_called()
+        mock_llm.answer_question.assert_not_called()
 
 
 class TestExtractQuestion:

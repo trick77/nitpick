@@ -1,15 +1,15 @@
-import asyncio
 import json
 import logging
 import re
-import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
+import openai
 import tiktoken
+from openai import AsyncOpenAI
 
-from app.config import CopilotConfig, ReviewConfig
+from app.config import LLMConfig, ReviewConfig
 from app.models import ReviewFinding
 
 logger = logging.getLogger(__name__)
@@ -298,17 +298,14 @@ COMPLIANCE_INSTRUCTIONS = (
 
 
 class LLMClient:
-    def __init__(self, config: CopilotConfig, review_config: ReviewConfig):
+    def __init__(self, config: LLMConfig, review_config: ReviewConfig):
         self.config = config
         self.review_config = review_config
-        self.client = httpx.AsyncClient(
-            headers={
-                "Authorization": f"Bearer {config.github_token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+        self.openai_client = AsyncOpenAI(
+            base_url=config.api_url,
+            api_key=config.github_token,
+            max_retries=3,
             timeout=120.0,
-            verify=ssl.create_default_context(),
         )
         self.prompt_template = _load_prompt_template(
             review_config.review_prompt_template,
@@ -318,73 +315,18 @@ class LLMClient:
         )
 
     async def close(self):
-        await self.client.aclose()
-
-    async def _post_with_retry(self, url: str, **kwargs) -> httpx.Response:
-        max_retries = 3
-        default_wait = 60.0
-        for attempt in range(max_retries + 1):
-            try:
-                response = await self.client.post(url, **kwargs)
-            except httpx.TimeoutException as exc:
-                if attempt >= max_retries:
-                    raise
-                logger.warning(
-                    "Timeout retry %d/%d — %s, retrying in %.0fs",
-                    attempt + 1, max_retries, type(exc).__name__, default_wait,
-                )
-                await asyncio.sleep(default_wait)
-                continue
-
-            if response.status_code not in (429, 500, 502, 503, 504):
-                return response
-
-            if response.status_code in (500, 502, 503, 504):
-                if attempt >= max_retries:
-                    return response
-                logger.warning(
-                    "%d server error retry %d/%d — waiting %.0fs before next attempt",
-                    response.status_code, attempt + 1, max_retries, default_wait,
-                )
-                await asyncio.sleep(default_wait)
-                continue
-
-            retry_after = response.headers.get("retry-after")
-            rate_limit_type = response.headers.get("x-ratelimit-type", "unknown")
-            time_remaining = response.headers.get("x-ratelimit-timeremaining", "unknown")
-
-            if attempt == 0:
-                try:
-                    wait_display = f"{float(retry_after):.0f}s" if retry_after else f"{time_remaining}s"
-                except (ValueError, TypeError):
-                    wait_display = f"{retry_after}"
-                logger.warning(
-                    "429 rate-limited — type: %s, wait: %s, body: %s",
-                    rate_limit_type, wait_display,
-                    response.text[:500],
-                )
-
-            if attempt >= max_retries:
-                return response
-
-            try:
-                wait = float(retry_after) if retry_after else default_wait
-            except (ValueError, TypeError):
-                wait = default_wait
-
-            logger.warning(
-                "429 retry %d/%d — waiting %.0fs before next attempt",
-                attempt + 1, max_retries, wait,
-            )
-            await asyncio.sleep(wait)
-
-        return response  # unreachable, but satisfies type checkers
+        await self.openai_client.close()
 
     async def check_connectivity(self) -> dict:
         base_url = self.config.api_url.split("/inference")[0]
         models_url = base_url + "/catalog/models"
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/json",
+        }
         try:
-            response = await self.client.get(models_url)
+            async with httpx.AsyncClient(headers=headers, timeout=30.0) as http:
+                response = await http.get(models_url)
             response.raise_for_status()
         except Exception as exc:
             logger.warning("Could not fetch model catalog from %s: %r — skipping validation", models_url, exc)
@@ -624,16 +566,17 @@ class LLMClient:
         try:
             answer, pt, ct = await self._call_mention_api(prompt)
             return answer, pt, ct, []
-        except httpx.TimeoutException as exc:
+        except openai.APITimeoutError as exc:
             paths = [f.path for f in group]
             logger.warning(
                 "Timeout on mention Q&A for %d file(s) — skipping: %s (%s)",
                 len(group), ", ".join(paths), type(exc).__name__,
             )
             return "", 0, 0, paths
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 413:
+        except openai.APIStatusError as exc:
+            if exc.status_code != 413:
                 raise
+            # APIStatusError.response is the underlying httpx.Response
             logger.warning("413 on mention Q&A: %s", exc.response.text[:500])
             limit_match = re.search(r"Max size:\s*([\d,]+)\s*tokens", exc.response.text)
             if limit_match:
@@ -682,22 +625,17 @@ class LLMClient:
             )
 
     async def _call_mention_api(self, prompt: str) -> tuple[str, int, int]:
-        payload = {
-            "model": self.config.model,
-            "messages": [
+        completion = await self.openai_client.chat.completions.create(
+            model=self.config.model,
+            messages=[
                 {"role": "system", "content": _MENTION_SYSTEM_MESSAGE},
                 {"role": "user", "content": prompt},
             ],
-        }
+        )
 
-        response = await self._post_with_retry(self.config.api_url, json=payload)
-        response.raise_for_status()
-
-        data = response.json()
-        usage = data.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        return data["choices"][0]["message"]["content"], prompt_tokens, completion_tokens
+        prompt_tokens = completion.usage.prompt_tokens if completion.usage else 0
+        completion_tokens = completion.usage.completion_tokens if completion.usage else 0
+        return completion.choices[0].message.content or "", prompt_tokens, completion_tokens
 
     async def _review_file_group(
         self,
@@ -714,16 +652,17 @@ class LLMClient:
         try:
             findings, pt, ct, requirements, change_summary = await self._call_api(prompt)
             return findings, pt, ct, [], requirements, change_summary
-        except httpx.TimeoutException as exc:
+        except openai.APITimeoutError as exc:
             paths = [f.path for f in group]
             logger.warning(
                 "Timeout reviewing %d file(s) — skipping: %s (%s)",
                 len(group), ", ".join(paths), type(exc).__name__,
             )
             return [], 0, 0, paths, [], []
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 413:
+        except openai.APIStatusError as exc:
+            if exc.status_code != 413:
                 raise
+            # APIStatusError.response is the underlying httpx.Response
             logger.warning("413 response body: %s", exc.response.text[:500])
             limit_match = re.search(r"Max size:\s*([\d,]+)\s*tokens", exc.response.text)
             if limit_match:
@@ -775,9 +714,9 @@ class LLMClient:
             )
 
     async def _call_api(self, prompt: str) -> tuple[list[ReviewFinding], int, int, list[dict], list[str]]:
-        payload = {
-            "model": self.config.model,
-            "messages": [
+        completion = await self.openai_client.chat.completions.create(
+            model=self.config.model,
+            messages=[
                 {"role": "system", "content": (
                     "You are a read-only code review assistant. You analyse code and may suggest fixes with code examples, "
                     "but never produce full patches, diffs to apply, or act as an agent that modifies repository content. "
@@ -789,15 +728,10 @@ class LLMClient:
                 )},
                 {"role": "user", "content": prompt},
             ],
-        }
+        )
 
-        response = await self._post_with_retry(self.config.api_url, json=payload)
-        response.raise_for_status()
-
-        data = response.json()
-        usage = data.get("usage", {})
-        prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
-        content = data["choices"][0]["message"]["content"]
+        prompt_tokens = completion.usage.prompt_tokens if completion.usage else 0
+        completion_tokens = completion.usage.completion_tokens if completion.usage else 0
+        content = completion.choices[0].message.content or ""
         findings, compliance_requirements, change_summary = _parse_review_response(content)
         return findings, prompt_tokens, completion_tokens, compliance_requirements, change_summary

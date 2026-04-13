@@ -87,7 +87,7 @@ class Reviewer:
     def __init__(
         self,
         bitbucket: BitbucketClient,
-        copilot: LLMClient,
+        llm: LLMClient,
         review_config: ReviewConfig,
         jira: JiraClient | None = None,
         server_config: ServerConfig | None = None,
@@ -95,7 +95,7 @@ class Reviewer:
         db_pool,
     ):
         self.bitbucket = bitbucket
-        self.copilot = copilot
+        self.llm = llm
         self.review_config = review_config
         self.jira = jira
         self.server_config = server_config or ServerConfig()
@@ -305,8 +305,8 @@ class Reviewer:
             deleted_paths: list[str] = []
             renamed_paths: list[str] = []
 
-            template = self.copilot.prompt_template
-            max_tokens = self.copilot.config.max_tokens_per_chunk
+            template = self.llm.prompt_template
+            max_tokens = self.llm.config.max_tokens_per_chunk
 
             rc = self.review_config
             if is_small_pr(files, max_tokens, template, count_tokens, format_file_entry):
@@ -376,7 +376,7 @@ class Reviewer:
                     logger.info("%s: linked Jira ticket %s", pr_tag, ticket_id)
 
             tone = self._tone_for_author(author_name)
-            llm_result = await self.copilot.review_diff(
+            llm_result = await self.llm.review_diff(
                 files, repo_instructions, tone=tone,
                 other_modified_paths=other_modified,
                 deleted_file_paths=deleted_paths,
@@ -535,7 +535,7 @@ class Reviewer:
                     review_effort=llm_result.review_effort,
                     prompt_tokens=llm_result.prompt_tokens,
                     completion_tokens=llm_result.completion_tokens,
-                    model_name=self.copilot.config.model,
+                    model_name=self.llm.config.model,
                     elapsed_seconds=elapsed,
                     cross_file_deps=len(cross_file_rels) if cross_file_rels else 0,
                     skipped_files=len(llm_result.skipped_files),
@@ -613,7 +613,7 @@ class Reviewer:
                     )
 
             tone = self._tone_for_author(pr.author.user.name)
-            answer = await self.copilot.answer_question(
+            answer = await self.llm.answer_question(
                 question, files, repo_instructions, tone=tone,
                 ticket_context=ticket_context,
             )
@@ -936,7 +936,7 @@ class Reviewer:
 
         if token_usage:
             prompt_t, completion_t = token_usage
-            model = self.copilot.config.model
+            model = self.llm.config.model
             total = prompt_t + completion_t
             stats = f"Model: `{model}` · {_fmt(prompt_t)}↑ {_fmt(completion_t)}↓ ({_fmt(total)} total)"
             if elapsed is not None:
