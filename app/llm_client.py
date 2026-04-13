@@ -410,7 +410,11 @@ class LLMClient:
         logger.info("\n".join(lines))
 
         if not matched:
-            raise ValueError(f"Model {self.config.model} not found in available models at {models_url}")
+            logger.warning(
+                "Model %s not found in catalog — skipping token limit validation",
+                self.config.model,
+            )
+            return {}
 
         limits = matched.get("limits", {})
         max_in = limits.get("max_input_tokens", matched.get("max_input_tokens", "unknown"))
