@@ -62,11 +62,7 @@ class ServerConfig(BaseModel):
 
 
 class DatabaseConfig(BaseModel):
-    url: str = ""
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.url)
+    url: str
 
 
 class AppConfig(BaseModel):
@@ -75,7 +71,7 @@ class AppConfig(BaseModel):
     review: ReviewConfig = ReviewConfig()
     jira: JiraConfig = JiraConfig()
     server: ServerConfig = ServerConfig()
-    database: DatabaseConfig = DatabaseConfig()
+    database: DatabaseConfig
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -141,6 +137,6 @@ def load_config() -> AppConfig:
             port=int(_env("SERVER_PORT", "8080")),
         ),
         database=DatabaseConfig(
-            url=_env("DATABASE_URL", ""),
+            url=_env("DATABASE_URL"),
         ),
     )

@@ -72,7 +72,7 @@ The mention trigger name defaults to `noergler` and can be changed via `REVIEW_M
 
 ## Configuration
 
-All configuration is driven by environment variables. The four required variables are:
+All configuration is driven by environment variables. The required variables are:
 
 | Variable | Description |
 |---|---|
@@ -80,20 +80,28 @@ All configuration is driven by environment variables. The four required variable
 | `BITBUCKET_TOKEN` | Bitbucket Server API token |
 | `BITBUCKET_WEBHOOK_SECRET` | Webhook HMAC secret for signature validation |
 | `GITHUB_TOKEN` | GitHub fine-grained access token with `models:read` scope |
+| `DATABASE_URL` | PostgreSQL connection string (see [Database](#database) below) |
 
 See [`.env.example`](.env.example) for all optional settings and their defaults.
 
-### Database (optional)
+### Database
 
-noergler can optionally persist review data to PostgreSQL. Without a database, the app runs normally — it falls back to parsing Bitbucket comment history for features like incremental reviews and deduplication.
+noergler requires PostgreSQL for review state, deduplication, and statistics. The database connection is validated on startup — the app will not start without it.
 
-To enable persistence, set the `DATABASE_URL` environment variable:
+Create a PostgreSQL database and user, then set `DATABASE_URL`:
+
+```sql
+CREATE USER noergler WITH PASSWORD 'changeme';
+CREATE DATABASE noergler OWNER noergler;
+```
 
 ```bash
-DATABASE_URL=postgresql://user:password@host:5432/noergler
+DATABASE_URL=postgresql://noergler:changeme@localhost:5432/noergler
 ```
 
 Both `postgresql://` and `postgres://` URI schemes are accepted.
+
+> **Tip:** In production, inject `DATABASE_URL` via container or orchestrator secrets (e.g. Kubernetes Secrets, `--env-file`) rather than storing credentials in plaintext.
 
 **What gets stored:**
 
@@ -111,8 +119,6 @@ Schema is managed with Alembic. Run migrations before first use:
 ```bash
 alembic upgrade head
 ```
-
-If the database is unreachable at startup, noergler logs a warning and continues without persistence.
 
 ## Webhook setup
 
