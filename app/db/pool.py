@@ -10,7 +10,9 @@ _pool: asyncpg.Pool | None = None
 async def create_pool(dsn: str) -> asyncpg.Pool:
     global _pool
     _pool = await asyncpg.create_pool(dsn)
-    logger.info("PostgreSQL connection pool created")
+    async with _pool.acquire() as conn:
+        version = await conn.fetchval("SELECT version()")
+    logger.info("PostgreSQL connection pool created (%s)", version)
     return _pool
 
 
