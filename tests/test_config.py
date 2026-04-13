@@ -9,6 +9,7 @@ def _make_config():
             base_url="https://bitbucket.example.com",
             token="secret-bb-token",
             webhook_secret="secret-webhook",
+            username="bot-user",
         ),
         copilot=CopilotConfig(
             model="openai/gpt-4.1",
@@ -71,6 +72,7 @@ def test_diff_context_from_env(monkeypatch):
         "BITBUCKET_URL": "https://bb.example.com",
         "BITBUCKET_TOKEN": "tok",
         "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "BITBUCKET_USERNAME": "bot",
         "GITHUB_TOKEN": "ghp_tok",
         "DATABASE_URL": "postgresql://u:p@localhost/db",
         "REVIEW_DIFF_EXTRA_LINES_BEFORE": "5",
@@ -92,6 +94,7 @@ def test_ticket_compliance_check_from_env(monkeypatch):
         "BITBUCKET_URL": "https://bb.example.com",
         "BITBUCKET_TOKEN": "tok",
         "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "BITBUCKET_USERNAME": "bot",
         "GITHUB_TOKEN": "ghp_tok",
         "DATABASE_URL": "postgresql://u:p@localhost/db",
         "REVIEW_TICKET_COMPLIANCE_CHECK": "false",
@@ -107,6 +110,7 @@ def test_ticket_compliance_check_default_from_env(monkeypatch):
         "BITBUCKET_URL": "https://bb.example.com",
         "BITBUCKET_TOKEN": "tok",
         "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "BITBUCKET_USERNAME": "bot",
         "GITHUB_TOKEN": "ghp_tok",
         "DATABASE_URL": "postgresql://u:p@localhost/db",
     }
