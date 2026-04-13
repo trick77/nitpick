@@ -75,8 +75,7 @@ def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
 @pytest.fixture()
 def client():
     mock_config = type("C", (), {
-        "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET})(),
-        "review": type("R", (), {"mention_trigger": "noergler"})(),
+        "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET, "username": "noergler"})(),
     })()
     mock_reviewer = AsyncMock()
     mock_reviewer.review_pull_request = AsyncMock()
