@@ -60,15 +60,45 @@ async def lifespan(app: FastAPI):
         jira_client = JiraClient(config.jira)
         logger.info("Jira integration enabled (%s)", config.jira.url)
 
-    await bitbucket_client.check_connectivity()
-    logger.info("Bot username: %s", bitbucket_client.bot_username)
-    await copilot_client.check_connectivity()
+    checks: dict[str, str | None] = {}
+
+    try:
+        await bitbucket_client.check_connectivity()
+        logger.info("Bot username: %s", bitbucket_client.bot_username)
+        checks["Bitbucket"] = None
+    except Exception as exc:
+        checks["Bitbucket"] = str(exc)
+
+    try:
+        await copilot_client.check_connectivity()
+        checks["LLM"] = None
+    except Exception as exc:
+        checks["LLM"] = str(exc)
 
     if jira_client:
-        if not await jira_client.check_connectivity():
-            jira_client = None
+        try:
+            await jira_client.check_connectivity()
+            checks["Jira"] = None
+        except Exception as exc:
+            checks["Jira"] = str(exc)
 
-    db_pool = await create_pool(config.database.url)
+    try:
+        db_pool = await create_pool(config.database.url)
+        checks["Database"] = None
+    except Exception as exc:
+        checks["Database"] = str(exc)
+        db_pool = None
+
+    failed = {k: v for k, v in checks.items() if v is not None}
+    if failed:
+        for name, error in failed.items():
+            logger.error("  ✘ %s: %s", name, error)
+        for name in checks:
+            if checks[name] is None:
+                logger.info("  ✔ %s: OK", name)
+        raise RuntimeError(
+            f"Startup aborted — {len(failed)} connection(s) failed: {', '.join(failed)}"
+        )
 
     reviewer = Reviewer(
         bitbucket_client, copilot_client, config.review,
