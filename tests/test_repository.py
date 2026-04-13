@@ -235,28 +235,27 @@ def _make_tx_pool(execute_side_effect):
 
 
 @pytest.mark.asyncio
-async def test_purge_pr_data_deletes_all_tables():
-    pool = _make_tx_pool(["DELETE 3", "DELETE 1", "DELETE 2", "DELETE 1"])
+async def test_purge_pr_data_deletes_review_data_but_keeps_stats():
+    pool = _make_tx_pool(["DELETE 3", "DELETE 1", "DELETE 1"])
 
     result = await repository.purge_pr_data(pool, "PROJ", "my-repo", 42)
 
     assert result == {
         "review_findings": 3,
         "pr_reviews": 1,
-        "review_statistics": 2,
         "feedback_events": 1,
     }
-    assert pool._conn.execute.await_count == 4
+    assert "review_statistics" not in result
+    assert pool._conn.execute.await_count == 3
     calls = [call.args[0] for call in pool._conn.execute.call_args_list]
     assert "DELETE FROM review_findings" in calls[0]
     assert "DELETE FROM pr_reviews" in calls[1]
-    assert "DELETE FROM review_statistics" in calls[2]
-    assert "DELETE FROM feedback_events" in calls[3]
+    assert "DELETE FROM feedback_events" in calls[2]
 
 
 @pytest.mark.asyncio
 async def test_purge_pr_data_zero_rows():
-    pool = _make_tx_pool(["DELETE 0", "DELETE 0", "DELETE 0", "DELETE 0"])
+    pool = _make_tx_pool(["DELETE 0", "DELETE 0", "DELETE 0"])
 
     result = await repository.purge_pr_data(pool, "PROJ", "my-repo", 999)
 
