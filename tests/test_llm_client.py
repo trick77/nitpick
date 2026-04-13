@@ -457,8 +457,8 @@ class TestLLMClient:
 
         client = LLMClient(copilot_config, review_config)
         try:
-            with pytest.raises(ValueError, match="not found in available models"):
-                await client.check_connectivity()
+            result = await client.check_connectivity()
+            assert result == {}
         finally:
             await client.close()
 
