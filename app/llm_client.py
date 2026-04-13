@@ -386,7 +386,7 @@ class LLMClient:
             model_list = models_data.get("data", models_data) if isinstance(models_data, dict) else models_data
 
             # Log all available models
-            lines = ["Available models:"]
+            lines = [f"Available models (from {models_url}):"]
             matched = None
             for model in model_list:
                 if not isinstance(model, dict):
