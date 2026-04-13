@@ -8,6 +8,7 @@ class BitbucketConfig(BaseModel):
     base_url: str
     token: str
     webhook_secret: str
+    username: str
 
 
 class CopilotConfig(BaseModel):
@@ -106,6 +107,7 @@ def load_config() -> AppConfig:
             base_url=_env("BITBUCKET_URL"),
             token=_env("BITBUCKET_TOKEN"),
             webhook_secret=_env("BITBUCKET_WEBHOOK_SECRET"),
+            username=_env("BITBUCKET_USERNAME"),
         ),
         copilot=CopilotConfig(
             model=_env("COPILOT_MODEL", "openai/gpt-4.1"),

@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
         logger.info("Jira integration enabled (%s)", config.jira.url)
 
     await bitbucket_client.check_connectivity()
-    await bitbucket_client.fetch_authenticated_user()
+    logger.info("Bot username: %s", bitbucket_client.bot_username)
     await copilot_client.check_connectivity()
 
     if jira_client:

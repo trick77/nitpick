@@ -17,7 +17,7 @@ SEVERITY_EMOJI = {"critical": "❌", "warning": "⚠️"}
 class BitbucketClient:
     def __init__(self, config: BitbucketConfig):
         self.config = config
-        self.bot_username: str | None = None
+        self.bot_username: str = config.username
         self.client = httpx.AsyncClient(
             base_url=config.base_url,
             headers={
@@ -43,25 +43,6 @@ class BitbucketClient:
             )
         except Exception as exc:
             logger.warning("Bitbucket connectivity check failed: %r", exc)
-
-    async def fetch_authenticated_user(self) -> None:
-        """Discover and store the bot's Bitbucket username via the whoami endpoint."""
-        try:
-            response = await self.client.get(
-                "/plugins/servlet/applinks/whoami",
-                headers={"Accept": "text/plain"},
-            )
-            if response.status_code == 200:
-                username = response.text.strip()
-                if username:
-                    self.bot_username = username
-                    logger.info("Bot username: %s", self.bot_username)
-                    return
-        except Exception:
-            pass
-        logger.warning(
-            "Could not determine bot username; falling back to marker-based comment identification"
-        )
 
     async def fetch_pr_diff(
         self, project: str, repo: str, pr_id: int, context_lines: int = 0
