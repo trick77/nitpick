@@ -1,13 +1,14 @@
-from unittest.mock import AsyncMock
+import logging
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.bitbucket import NOERGLER_MARKER
 from app.config import ReviewConfig
 from app.llm_client import LLMClient, FileReviewData
-from app.jira import JiraClient, JiraTicket
+from app.jira import JiraTicket
 from app.models import ReviewFinding, WebhookPayload
-from app.reviewer import Reviewer, _count_diff_lines, _is_bot_comment, _sort_and_limit
+from app.reviewer import Reviewer, _count_diff_lines, _sort_and_limit
 
 
 def _review_config(**overrides) -> ReviewConfig:
@@ -1363,8 +1364,6 @@ class TestHandlePrDeleted:
 
         rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=mock_pool)
 
-        import logging
-        from unittest.mock import patch
         with patch("app.reviewer.repository.purge_pr_data", new_callable=AsyncMock) as mock_purge:
             mock_purge.return_value = {
                 "review_findings": 5, "pr_reviews": 1,
@@ -1382,8 +1381,6 @@ class TestHandlePrDeleted:
 
         rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=mock_pool)
 
-        import logging
-        from unittest.mock import patch
         with patch("app.reviewer.repository.purge_pr_data", new_callable=AsyncMock) as mock_purge:
             mock_purge.return_value = {
                 "review_findings": 0, "pr_reviews": 0,
@@ -1400,13 +1397,13 @@ class TestHandlePrDeleted:
 
         rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=mock_pool)
 
-        import logging
-        from unittest.mock import patch
         with patch("app.reviewer.repository.purge_pr_data", new_callable=AsyncMock) as mock_purge:
             mock_purge.side_effect = RuntimeError("connection lost")
-            with caplog.at_level(logging.ERROR):
+            with caplog.at_level(logging.WARNING):
                 await rev.handle_pr_deleted(_make_payload())
 
+        # _safe_db logs the warning, then handle_pr_deleted logs the error
+        assert "DB operation failed" in caplog.text
         assert "Purge for deleted" in caplog.text
 
 

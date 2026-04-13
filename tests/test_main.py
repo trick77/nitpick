@@ -90,7 +90,7 @@ def client():
     original_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
-    async def noop_lifespan(a):
+    async def noop_lifespan(_a):
         yield
 
     main_module.config = mock_config

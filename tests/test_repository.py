@@ -101,7 +101,7 @@ async def test_delete_pr_review_executes_delete():
     await repository.delete_pr_review(pool, "PROJ", "my-repo", 42)
 
     pool._conn.execute.assert_awaited_once()
-    sql, *args = pool._conn.execute.call_args.args
+    sql, *_args = pool._conn.execute.call_args.args
     assert "DELETE FROM pr_reviews" in sql
 
 

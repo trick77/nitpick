@@ -46,7 +46,7 @@ jira_client = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     global config, reviewer, bitbucket_client, copilot_client, jira_client
 
     _unify_uvicorn_logging()
