@@ -9,7 +9,7 @@ import openai
 import tiktoken
 from openai import AsyncOpenAI
 
-from app.config import CopilotConfig, ReviewConfig
+from app.config import LLMConfig, ReviewConfig
 from app.models import ReviewFinding
 
 logger = logging.getLogger(__name__)
@@ -298,7 +298,7 @@ COMPLIANCE_INSTRUCTIONS = (
 
 
 class LLMClient:
-    def __init__(self, config: CopilotConfig, review_config: ReviewConfig):
+    def __init__(self, config: LLMConfig, review_config: ReviewConfig):
         self.config = config
         self.review_config = review_config
         self.openai_client = AsyncOpenAI(

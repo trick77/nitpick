@@ -182,7 +182,7 @@ GET /health → {"status": "ok"}
 app/
   main.py              # FastAPI app, /webhook and /health endpoints
   reviewer.py          # Review orchestrator (diff → AI → comments)
-  copilot.py           # GitHub Models API client, token-aware chunking
+  llm_client.py        # OpenAI SDK client for GitHub Models, token-aware chunking
   context_expansion.py # Asymmetric & dynamic diff context expansion
   cross_file_context.py # Cross-file symbol reference analysis
   diff_compression.py  # Large PR compression and file prioritization

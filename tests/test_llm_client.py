@@ -6,7 +6,7 @@ import openai
 import pytest
 import respx
 
-from app.config import CopilotConfig, ReviewConfig
+from app.config import LLMConfig, ReviewConfig
 from app.llm_client import (
     LLMClient,
     FileReviewData,
@@ -22,8 +22,8 @@ from app.llm_client import (
 
 
 @pytest.fixture
-def copilot_config():
-    return CopilotConfig(
+def llm_config():
+    return LLMConfig(
         model="openai/gpt-4.1",
         github_token="test-token",
         api_url="https://models.github.ai/inference",
@@ -374,8 +374,8 @@ class TestGroupFilesByTokenBudget:
 
 
 class TestSystemMessage:
-    def test_system_message_contains_injection_warning(self, copilot_config, review_config):
-        client = LLMClient(copilot_config, review_config)
+    def test_system_message_contains_injection_warning(self, llm_config, review_config):
+        client = LLMClient(llm_config, review_config)
         # The system message is embedded in _call_api; verify by checking the constant
         system_msg = (
             "You are a read-only code review assistant. You analyse code and may suggest fixes with code examples, "
@@ -392,7 +392,7 @@ class TestSystemMessage:
 
 class TestLLMClient:
     @pytest.mark.asyncio
-    async def test_review_diff(self, copilot_config, review_config):
+    async def test_review_diff(self, llm_config, review_config):
         review_content = json.dumps([
             {
                 "file": "src/main.py",
@@ -402,7 +402,7 @@ class TestLLMClient:
             }
         ])
 
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = AsyncMock(
             return_value=_mock_completion(review_content, 100, 50)
         )
@@ -421,7 +421,7 @@ class TestLLMClient:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_check_connectivity_found(self, copilot_config, review_config):
+    async def test_check_connectivity_found(self, llm_config, review_config):
         models_response = {
             "data": [
                 {
@@ -443,7 +443,7 @@ class TestLLMClient:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         try:
             result = await client.check_connectivity()
             assert result is not None
@@ -453,14 +453,14 @@ class TestLLMClient:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_check_connectivity_not_found(self, copilot_config, review_config):
+    async def test_check_connectivity_not_found(self, llm_config, review_config):
         models_response = {"data": [{"id": "other-model"}]}
 
         respx.get("https://models.github.ai/catalog/models").mock(
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         try:
             result = await client.check_connectivity()
             assert result == {}
@@ -470,10 +470,10 @@ class TestLLMClient:
 
 class TestRepoInstructionsInReviewPrompt:
     @pytest.mark.asyncio
-    async def test_repo_instructions_replaced_in_review_prompt(self, copilot_config, review_config):
+    async def test_repo_instructions_replaced_in_review_prompt(self, llm_config, review_config):
         """Verify {repo_instructions} placeholder is replaced, not left as literal text."""
         mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = mock_create
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
@@ -488,10 +488,10 @@ class TestRepoInstructionsInReviewPrompt:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_empty_repo_instructions_clears_placeholder(self, copilot_config, review_config):
+    async def test_empty_repo_instructions_clears_placeholder(self, llm_config, review_config):
         """When no repo instructions, placeholder is replaced with empty string."""
         mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = mock_create
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
@@ -507,9 +507,9 @@ class TestRepoInstructionsInReviewPrompt:
 
 class TestComplianceInstructions:
     @pytest.mark.asyncio
-    async def test_compliance_instructions_included_when_enabled_with_ticket(self, copilot_config, review_config):
+    async def test_compliance_instructions_included_when_enabled_with_ticket(self, llm_config, review_config):
         mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = mock_create
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
@@ -525,9 +525,9 @@ class TestComplianceInstructions:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_compliance_instructions_excluded_when_disabled(self, copilot_config, review_config):
+    async def test_compliance_instructions_excluded_when_disabled(self, llm_config, review_config):
         mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = mock_create
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
@@ -543,9 +543,9 @@ class TestComplianceInstructions:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_compliance_instructions_excluded_when_no_ticket_context(self, copilot_config, review_config):
+    async def test_compliance_instructions_excluded_when_no_ticket_context(self, llm_config, review_config):
         mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = mock_create
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
@@ -561,9 +561,9 @@ class TestComplianceInstructions:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_ticket_context_always_present_regardless_of_compliance_flag(self, copilot_config, review_config):
+    async def test_ticket_context_always_present_regardless_of_compliance_flag(self, llm_config, review_config):
         mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = mock_create
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
@@ -580,8 +580,8 @@ class TestComplianceInstructions:
 
 class TestAnswerQuestion:
     @pytest.mark.asyncio
-    async def test_answer_question_with_file_data(self, copilot_config, review_config):
-        client = LLMClient(copilot_config, review_config)
+    async def test_answer_question_with_file_data(self, llm_config, review_config):
+        client = LLMClient(llm_config, review_config)
         client.openai_client.chat.completions.create = AsyncMock(
             return_value=_mock_completion("The function calculates fibonacci numbers.", 200, 30)
         )
@@ -593,8 +593,8 @@ class TestAnswerQuestion:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_answer_question_413_bisects_and_retries(self, copilot_config, review_config):
-        client = LLMClient(copilot_config, review_config)
+    async def test_answer_question_413_bisects_and_retries(self, llm_config, review_config):
+        client = LLMClient(llm_config, review_config)
 
         files = [
             FileReviewData(path="a.py", diff="+a\n", content="a\n"),
@@ -623,8 +623,8 @@ class TestAnswerQuestion:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_answer_question_413_single_file_retries_diff_only(self, copilot_config, review_config):
-        client = LLMClient(copilot_config, review_config)
+    async def test_answer_question_413_single_file_retries_diff_only(self, llm_config, review_config):
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
         call_count = 0
@@ -649,8 +649,8 @@ class TestAnswerQuestion:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_answer_question_413_all_skipped_returns_fallback(self, copilot_config, review_config):
-        client = LLMClient(copilot_config, review_config)
+    async def test_answer_question_413_all_skipped_returns_fallback(self, llm_config, review_config):
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content=None)]
 
@@ -679,9 +679,9 @@ def _make_api_status_error(status_code: int, text: str = "") -> openai.APIStatus
 
 class TestReviewFileGroup413Retry:
     @pytest.mark.asyncio
-    async def test_413_bisects_and_retries(self, copilot_config, review_config):
+    async def test_413_bisects_and_retries(self, llm_config, review_config):
         """On 413, the file group is bisected and each half retried."""
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
 
         files = [
             FileReviewData(path="a.py", diff="+a\n", content="a\n"),
@@ -723,9 +723,9 @@ class TestReviewFileGroup413Retry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_single_file_retries_diff_only(self, copilot_config, review_config):
+    async def test_413_single_file_retries_diff_only(self, llm_config, review_config):
         """A single file with content that triggers 413 retries with diff only."""
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
         call_count = 0
@@ -748,9 +748,9 @@ class TestReviewFileGroup413Retry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_single_file_skipped_when_already_diff_only(self, copilot_config, review_config):
+    async def test_413_single_file_skipped_when_already_diff_only(self, llm_config, review_config):
         """A single file already without content that triggers 413 is skipped."""
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content=None)]
 
@@ -769,9 +769,9 @@ class TestReviewFileGroup413Retry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_single_file_falls_through_when_diff_only_also_fails(self, copilot_config, review_config):
+    async def test_413_single_file_falls_through_when_diff_only_also_fails(self, llm_config, review_config):
         """A single file that 413s with content and again with diff-only is skipped."""
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="huge.py", diff="+x\n", content="x\n")]
 
@@ -788,9 +788,9 @@ class TestReviewFileGroup413Retry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_max_depth_stops_recursion(self, copilot_config, review_config):
+    async def test_413_max_depth_stops_recursion(self, llm_config, review_config):
         """Recursion stops at max_depth even with multiple files."""
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
 
         files = [
             FileReviewData(path="a.py", diff="+a\n", content="a\n"),
@@ -810,9 +810,9 @@ class TestReviewFileGroup413Retry:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_non_413_error_propagates(self, copilot_config, review_config):
+    async def test_non_413_error_propagates(self, llm_config, review_config):
         """Non-413 HTTP errors are not caught."""
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="a.py", diff="+a\n", content="a\n")]
 
@@ -865,9 +865,9 @@ class TestEstimateReviewEffort:
 class TestAutoCapTokenBudget:
     @pytest.mark.asyncio
     @respx.mock
-    async def test_check_connectivity_caps_max_tokens_per_chunk(self, copilot_config, review_config):
+    async def test_check_connectivity_caps_max_tokens_per_chunk(self, llm_config, review_config):
         """When model max_input_tokens < max_tokens_per_chunk, cap to model limit."""
-        copilot_config.max_tokens_per_chunk = 80000
+        llm_config.max_tokens_per_chunk = 80000
         models_response = {
             "data": [
                 {
@@ -882,19 +882,19 @@ class TestAutoCapTokenBudget:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         try:
             result = await client.check_connectivity()
             assert result is not None
-            assert copilot_config.max_tokens_per_chunk == 4000
+            assert llm_config.max_tokens_per_chunk == 4000
         finally:
             await client.close()
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_check_connectivity_no_cap_when_model_limit_higher(self, copilot_config, review_config):
+    async def test_check_connectivity_no_cap_when_model_limit_higher(self, llm_config, review_config):
         """When model max_input_tokens >= max_tokens_per_chunk, no capping occurs."""
-        copilot_config.max_tokens_per_chunk = 80000
+        llm_config.max_tokens_per_chunk = 80000
         models_response = {
             "data": [
                 {
@@ -909,18 +909,18 @@ class TestAutoCapTokenBudget:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         try:
             await client.check_connectivity()
-            assert copilot_config.max_tokens_per_chunk == 80000
+            assert llm_config.max_tokens_per_chunk == 80000
         finally:
             await client.close()
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_check_connectivity_warns_low_effective_budget(self, copilot_config, review_config, caplog):
+    async def test_check_connectivity_warns_low_effective_budget(self, llm_config, review_config, caplog):
         """When effective budget after prompt overhead is < 2000, a warning is logged."""
-        copilot_config.max_tokens_per_chunk = 80000
+        llm_config.max_tokens_per_chunk = 80000
         models_response = {
             "data": [
                 {
@@ -935,12 +935,12 @@ class TestAutoCapTokenBudget:
             return_value=httpx.Response(200, json=models_response)
         )
 
-        client = LLMClient(copilot_config, review_config)
+        client = LLMClient(llm_config, review_config)
         try:
             import logging
             with caplog.at_level(logging.WARNING, logger="app.llm_client"):
                 await client.check_connectivity()
-            assert copilot_config.max_tokens_per_chunk == 2000
+            assert llm_config.max_tokens_per_chunk == 2000
             assert any("Effective token budget" in msg for msg in caplog.messages)
         finally:
             await client.close()
@@ -948,10 +948,10 @@ class TestAutoCapTokenBudget:
 
 class TestParse413TokenLimit:
     @pytest.mark.asyncio
-    async def test_413_with_max_size_updates_config(self, copilot_config, review_config):
+    async def test_413_with_max_size_updates_config(self, llm_config, review_config):
         """A 413 response body containing 'Max size: N tokens' updates max_tokens_per_chunk."""
-        copilot_config.max_tokens_per_chunk = 80000
-        client = LLMClient(copilot_config, review_config)
+        llm_config.max_tokens_per_chunk = 80000
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
 
@@ -963,15 +963,15 @@ class TestParse413TokenLimit:
             template = client.prompt_template
             _, _, _, skipped, _, _ = await client._review_file_group(files, template, depth=0)
             assert skipped == ["big.py"]
-            assert copilot_config.max_tokens_per_chunk == 4000
+            assert llm_config.max_tokens_per_chunk == 4000
         finally:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_without_max_size_leaves_config_unchanged(self, copilot_config, review_config):
+    async def test_413_without_max_size_leaves_config_unchanged(self, llm_config, review_config):
         """A 413 response without the 'Max size' pattern does not change max_tokens_per_chunk."""
-        copilot_config.max_tokens_per_chunk = 80000
-        client = LLMClient(copilot_config, review_config)
+        llm_config.max_tokens_per_chunk = 80000
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
 
@@ -982,15 +982,15 @@ class TestParse413TokenLimit:
         try:
             template = client.prompt_template
             await client._review_file_group(files, template, depth=0)
-            assert copilot_config.max_tokens_per_chunk == 80000
+            assert llm_config.max_tokens_per_chunk == 80000
         finally:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_413_answer_group_parses_limit(self, copilot_config, review_config):
+    async def test_413_answer_group_parses_limit(self, llm_config, review_config):
         """413 in _answer_file_group also parses and updates max_tokens_per_chunk."""
-        copilot_config.max_tokens_per_chunk = 80000
-        client = LLMClient(copilot_config, review_config)
+        llm_config.max_tokens_per_chunk = 80000
+        client = LLMClient(llm_config, review_config)
 
         files = [FileReviewData(path="big.py", diff="+x\n", content=None)]
 
@@ -1002,6 +1002,6 @@ class TestParse413TokenLimit:
             template = "{diff}"
             _, _, _, skipped = await client._answer_file_group(files, template, depth=0)
             assert skipped == ["big.py"]
-            assert copilot_config.max_tokens_per_chunk == 5000
+            assert llm_config.max_tokens_per_chunk == 5000
         finally:
             await client.close()
