@@ -14,8 +14,13 @@ class BitbucketConfig(BaseModel):
 class CopilotConfig(BaseModel):
     model: str = "openai/gpt-4.1"
     github_token: str
-    api_url: str = "https://models.github.ai/inference/chat/completions"
+    api_url: str = "https://models.github.ai/inference"
     max_tokens_per_chunk: int = 80000
+
+    @field_validator("api_url", mode="after")
+    @classmethod
+    def strip_chat_completions_suffix(cls, v: str) -> str:
+        return v.removesuffix("/chat/completions")
 
 
 class ReviewConfig(BaseModel):
@@ -108,7 +113,7 @@ def load_config() -> AppConfig:
         copilot=CopilotConfig(
             model=_env("COPILOT_MODEL", "openai/gpt-4.1"),
             github_token=_env("GITHUB_TOKEN"),
-            api_url=_env("COPILOT_API_URL", "https://models.github.ai/inference/chat/completions"),
+            api_url=_env("COPILOT_API_URL", "https://models.github.ai/inference"),
             max_tokens_per_chunk=int(_env("COPILOT_MAX_TOKENS_PER_CHUNK", "80000")),
         ),
         review=ReviewConfig(
