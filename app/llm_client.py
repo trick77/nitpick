@@ -307,10 +307,6 @@ class LLMClient:
             max_retries=3,
             timeout=120.0,
         )
-        self._auth_headers = {
-            "Authorization": f"Bearer {config.github_token}",
-            "Accept": "application/json",
-        }
         self.prompt_template = _load_prompt_template(
             review_config.review_prompt_template,
         )
@@ -324,8 +320,12 @@ class LLMClient:
     async def check_connectivity(self) -> dict:
         base_url = self.config.api_url.split("/inference")[0]
         models_url = base_url + "/catalog/models"
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/json",
+        }
         try:
-            async with httpx.AsyncClient(headers=self._auth_headers, timeout=30.0) as http:
+            async with httpx.AsyncClient(headers=headers, timeout=30.0) as http:
                 response = await http.get(models_url)
             response.raise_for_status()
         except Exception as exc:
@@ -576,6 +576,7 @@ class LLMClient:
         except openai.APIStatusError as exc:
             if exc.status_code != 413:
                 raise
+            # APIStatusError.response is the underlying httpx.Response
             logger.warning("413 on mention Q&A: %s", exc.response.text[:500])
             limit_match = re.search(r"Max size:\s*([\d,]+)\s*tokens", exc.response.text)
             if limit_match:
@@ -661,6 +662,7 @@ class LLMClient:
         except openai.APIStatusError as exc:
             if exc.status_code != 413:
                 raise
+            # APIStatusError.response is the underlying httpx.Response
             logger.warning("413 response body: %s", exc.response.text[:500])
             limit_match = re.search(r"Max size:\s*([\d,]+)\s*tokens", exc.response.text)
             if limit_match:
