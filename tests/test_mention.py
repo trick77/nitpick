@@ -72,6 +72,7 @@ def reviewer(mock_bitbucket, mock_copilot):
     return Reviewer(
         mock_bitbucket, mock_copilot,
         ReviewConfig(auto_review_authors=["pr-author"]),
+        db_pool=AsyncMock(),
     )
 
 
@@ -140,6 +141,7 @@ class TestHandleMention:
             mock_bitbucket, mock_copilot,
             ReviewConfig(auto_review_authors=["pr-author"]),
             jira=mock_jira,
+            db_pool=AsyncMock(),
         )
         payload = _make_mention_payload("@noergler explain this")
         # Set branch to include ticket ID

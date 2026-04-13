@@ -1,6 +1,6 @@
 import logging
 
-from app.config import AppConfig, BitbucketConfig, CopilotConfig, ReviewConfig, ServerConfig, load_config, log_config
+from app.config import AppConfig, BitbucketConfig, CopilotConfig, DatabaseConfig, ReviewConfig, ServerConfig, load_config, log_config
 
 
 def _make_config():
@@ -23,6 +23,7 @@ def _make_config():
             ramsay_authors=["alice"],
         ),
         server=ServerConfig(host="0.0.0.0", port=9090),
+        database=DatabaseConfig(url="postgresql://noergler:secret@localhost/noergler"),
     )
 
 
@@ -71,6 +72,7 @@ def test_diff_context_from_env(monkeypatch):
         "BITBUCKET_TOKEN": "tok",
         "BITBUCKET_WEBHOOK_SECRET": "sec",
         "GITHUB_TOKEN": "ghp_tok",
+        "DATABASE_URL": "postgresql://u:p@localhost/db",
         "REVIEW_DIFF_EXTRA_LINES_BEFORE": "5",
         "REVIEW_DIFF_EXTRA_LINES_AFTER": "2",
         "REVIEW_DIFF_MAX_EXTRA_LINES_DYNAMIC_CONTEXT": "12",
@@ -91,6 +93,7 @@ def test_ticket_compliance_check_from_env(monkeypatch):
         "BITBUCKET_TOKEN": "tok",
         "BITBUCKET_WEBHOOK_SECRET": "sec",
         "GITHUB_TOKEN": "ghp_tok",
+        "DATABASE_URL": "postgresql://u:p@localhost/db",
         "REVIEW_TICKET_COMPLIANCE_CHECK": "false",
     }
     for k, v in env.items():
@@ -105,6 +108,7 @@ def test_ticket_compliance_check_default_from_env(monkeypatch):
         "BITBUCKET_TOKEN": "tok",
         "BITBUCKET_WEBHOOK_SECRET": "sec",
         "GITHUB_TOKEN": "ghp_tok",
+        "DATABASE_URL": "postgresql://u:p@localhost/db",
     }
     for k, v in env.items():
         monkeypatch.setenv(k, v)

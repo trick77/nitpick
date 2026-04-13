@@ -7,7 +7,7 @@ from app.config import ReviewConfig
 from app.llm_client import LLMClient, FileReviewData
 from app.jira import JiraClient, JiraTicket
 from app.models import ReviewFinding, WebhookPayload
-from app.reviewer import Reviewer, _count_diff_lines, _deduplicate, _extract_last_reviewed_commit, _is_bot_comment, _sort_and_limit
+from app.reviewer import Reviewer, _count_diff_lines, _is_bot_comment, _sort_and_limit
 
 
 def _review_config(**overrides) -> ReviewConfig:
@@ -257,7 +257,7 @@ def mock_copilot():
 
 @pytest.fixture
 def reviewer(mock_bitbucket, mock_copilot):
-    return Reviewer(mock_bitbucket, mock_copilot, _review_config())
+    return Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
 
 
 class TestReviewer:
@@ -321,7 +321,7 @@ class TestReviewer:
     @pytest.mark.asyncio
     async def test_content_fetch_failure_falls_back_to_diff_only(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -333,7 +333,7 @@ class TestReviewer:
     @pytest.mark.asyncio
     async def test_content_preserved_for_small_pr(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_file_content = AsyncMock(return_value="hello\n")
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -355,7 +355,7 @@ class TestReviewer:
         mock_copilot.prompt_template = "{files}\n{tone}\n{repo_instructions}"
         mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -369,7 +369,7 @@ class TestReviewer:
         assert reviewer.is_auto_review_author("other.user") is False
 
     def test_is_auto_review_author_empty_list(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(auto_review_authors=[]))
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(auto_review_authors=[]), db_pool=AsyncMock())
         assert rev.is_auto_review_author("anyone") is True
 
     def test_build_summary_mixed(self, reviewer):
@@ -390,7 +390,7 @@ class TestReviewer:
     @pytest.mark.asyncio
     async def test_review_real_webhook_payload(self, mock_bitbucket, mock_copilot):
         payload = _make_real_payload()
-        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(auto_review_authors=["username"]))
+        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(auto_review_authors=["username"]), db_pool=AsyncMock())
         await reviewer.review_pull_request(payload)
 
         # Single diff fetch, context expanded locally
@@ -400,7 +400,7 @@ class TestReviewer:
         mock_bitbucket.post_pr_comment.assert_called_once()
 
 
-class TestDedupAndLimit:
+class TestSortAndLimit:
     def test_findings_limited_to_max_comments(self):
         findings = [
             ReviewFinding(file=f"f{i}.py", line=i, severity="warning", comment=f"issue {i}")
@@ -426,41 +426,9 @@ class TestDedupAndLimit:
         sorted_findings, _ = _sort_and_limit(findings, max_comments=25)
         assert [f.severity for f in sorted_findings] == ["critical", "warning"]
 
-    def test_dedup_skips_existing_nitpick_comments(self):
-        findings = [
-            ReviewFinding(file="a.py", line=10, severity="critical", comment="bug"),
-            ReviewFinding(file="b.py", line=20, severity="warning", comment="style"),
-        ]
-        existing = [
-            {"text": f"**Suggestion:** bug\n\n**Severity Level:** Critical ❌\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
-        ]
-        result = _deduplicate(findings, existing)
-        assert len(result) == 1
-        assert result[0].file == "b.py"
-
-    def test_dedup_ignores_human_comments(self):
-        findings = [
-            ReviewFinding(file="a.py", line=10, severity="critical", comment="bug"),
-        ]
-        existing = [
-            {"text": "**Severity Level:** Critical ❌", "path": "a.py", "line": 10},
-        ]
-        result = _deduplicate(findings, existing)
-        assert len(result) == 1
-
-    def test_dedup_ignores_different_severity(self):
-        findings = [
-            ReviewFinding(file="a.py", line=10, severity="warning", comment="style"),
-        ]
-        existing = [
-            {"text": f"**Suggestion:** bug\n\n**Severity Level:** Critical ❌\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 10},
-        ]
-        result = _deduplicate(findings, existing)
-        assert len(result) == 1
-
     @pytest.fixture
     def reviewer(self, mock_bitbucket, mock_copilot):
-        return Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        return Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
 
     def test_build_summary_truncated(self, reviewer):
         findings = [
@@ -553,7 +521,7 @@ class TestDedupAndLimit:
             ReviewFinding(file=f"f{i}.py", line=i, severity="warning", comment=f"issue {i}")
             for i in range(30)
         ])
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_comments=5))
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_comments=5), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -564,7 +532,7 @@ class TestDedupAndLimit:
     @pytest.mark.asyncio
     async def test_dedup_graceful_on_fetch_failure(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_pr_comments.side_effect = Exception("API error")
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -572,18 +540,17 @@ class TestDedupAndLimit:
         mock_bitbucket.post_pr_comment.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_persistent_comment_updates_existing(self, mock_bitbucket, mock_copilot):
+    async def test_persistent_comment_updates_existing(self, mock_bitbucket, mock_copilot, monkeypatch):
         mock_bitbucket.update_pr_comment = AsyncMock(return_value=True)
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 77,
-                "version": 2,
-                "text": f"🤖 **Review summary:** old\n\n{NOERGLER_MARKER}",
-                "path": None,
-                "line": None,
-            },
-        ]
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        monkeypatch.setattr(
+            "app.reviewer.repository.upsert_pr_review",
+            AsyncMock(return_value=99),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_summary_comment_info",
+            AsyncMock(return_value={"summary_comment_id": 77, "summary_comment_version": 2}),
+        )
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -596,7 +563,7 @@ class TestDedupAndLimit:
     @pytest.mark.asyncio
     async def test_persistent_comment_creates_new_when_none_exists(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.fetch_pr_comments.return_value = []
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -614,7 +581,7 @@ class TestDedupAndLimit:
                 "line": 10,
             },
         ]
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -765,7 +732,7 @@ class TestHandleMention:
         mock_copilot.answer_question = AsyncMock(return_value="Here's the answer.")
         mock_bitbucket.reply_to_comment = AsyncMock()
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_mention_payload("@noergler what does this do?")
         await rev.handle_mention(payload)
 
@@ -790,7 +757,7 @@ class TestHandleMention:
         )
         mock_bitbucket.reply_to_comment = AsyncMock()
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_mention_payload("@noergler what does this do?")
         await rev.handle_mention(payload)
 
@@ -802,7 +769,7 @@ class TestHandleMention:
     @pytest.mark.asyncio
     async def test_mention_triggers_full_review(self, mock_bitbucket, mock_copilot):
         mock_bitbucket.reply_to_comment = AsyncMock()
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_mention_payload("@noergler review")
         await rev.handle_mention(payload)
 
@@ -818,7 +785,7 @@ class TestMaxFileLines:
         mock_bitbucket.fetch_file_content = AsyncMock(return_value=content)
         mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100))
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -833,7 +800,7 @@ class TestMaxFileLines:
         mock_bitbucket.fetch_file_content = AsyncMock(return_value=content)
         mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100))
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -848,7 +815,7 @@ class TestMaxFileLines:
         mock_bitbucket.fetch_file_content = AsyncMock(return_value=content)
         mock_copilot.review_diff = AsyncMock(return_value=_make_review_result())
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100))
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(max_file_lines=100), db_pool=AsyncMock())
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
@@ -857,40 +824,40 @@ class TestMaxFileLines:
         assert "`file.py`" in summary_text
 
     def test_build_summary_content_skipped_files(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         summary = rev._build_summary([], content_skipped_files=["large.py"])
         assert "Reviewed without full file context (too large)" in summary
         assert "`large.py`" in summary
 
     def test_build_summary_no_content_skipped_files(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         summary = rev._build_summary([], content_skipped_files=[])
         assert "Reviewed without full file context" not in summary
 
 
 class TestTicketExtraction:
     def test_extract_ticket_id_from_branch(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload(branch="feature/SEP-22888-description")
         assert rev._extract_ticket_id(payload.pullRequest) == "SEP-22888"
 
     def test_extract_ticket_id_from_branch_slash(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload(branch="SEP-22888/description")
         assert rev._extract_ticket_id(payload.pullRequest) == "SEP-22888"
 
     def test_extract_ticket_id_from_title(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload(branch="feature/no-ticket", title="SEP-22888 Fix login")
         assert rev._extract_ticket_id(payload.pullRequest) == "SEP-22888"
 
     def test_extract_ticket_id_none(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload(branch="feature/no-ticket", title="Fix login bug")
         assert rev._extract_ticket_id(payload.pullRequest) is None
 
     def test_extract_ticket_id_branch_priority(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload(branch="feature/SEP-111-fix", title="SEP-222 other fix")
         assert rev._extract_ticket_id(payload.pullRequest) == "SEP-111"
 
@@ -898,7 +865,7 @@ class TestTicketExtraction:
 class TestBuildSummaryWithTicket:
     @pytest.fixture
     def reviewer(self, mock_bitbucket, mock_copilot):
-        return Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        return Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
 
     def test_build_summary_with_ticket(self, reviewer):
         ticket = JiraTicket(
@@ -1010,7 +977,7 @@ class TestBuildSummaryWithTicket:
         )
         mock_jira = AsyncMock()
         mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
-        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira, db_pool=AsyncMock())
         context, returned_ticket = await reviewer._fetch_ticket_context("SEP-100")
         assert returned_ticket is ticket
         assert "**Type:** Bug" in context
@@ -1025,7 +992,7 @@ class TestBuildSummaryWithTicket:
         )
         mock_jira = AsyncMock()
         mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
-        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira, db_pool=AsyncMock())
         context, _ = await reviewer._fetch_ticket_context("SEP-100")
         assert "**Type:**" not in context
         assert "**Status:**" not in context
@@ -1046,7 +1013,7 @@ class TestBuildSummaryWithTicket:
         )
         mock_jira = AsyncMock()
         mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
-        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        reviewer = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira, db_pool=AsyncMock())
         context, returned_ticket = await reviewer._fetch_ticket_context("SEP-101", parent=parent)
         assert returned_ticket is ticket
         assert "### Parent ticket: [SEP-100]" in context
@@ -1093,7 +1060,7 @@ class TestReviewWithJira:
         ]
         mock_copilot.review_diff.return_value = result
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira, db_pool=AsyncMock())
         payload = _make_payload(branch="feature/SEP-123-login")
         await rev.review_pull_request(payload)
 
@@ -1127,7 +1094,7 @@ class TestReviewWithJira:
         mock_jira.fetch_ticket = AsyncMock(return_value=subtask)
         mock_copilot.review_diff.return_value = _make_review_result()
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira)
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), jira=mock_jira, db_pool=AsyncMock())
         payload = _make_payload(branch="feature/SEP-124-subtask")
         await rev.review_pull_request(payload)
 
@@ -1145,7 +1112,7 @@ class TestReviewWithJira:
 
     @pytest.mark.asyncio
     async def test_review_jira_disabled(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload(branch="feature/SEP-123-login")
         await rev.review_pull_request(payload)
 
@@ -1169,6 +1136,7 @@ class TestReviewWithJira:
             mock_bitbucket, mock_copilot,
             _review_config(ticket_compliance_check=False),
             jira=mock_jira,
+            db_pool=AsyncMock(),
         )
         payload = _make_payload(branch="feature/SEP-123-login")
         await rev.review_pull_request(payload)
@@ -1219,7 +1187,7 @@ class TestHandleFeedback:
         ]
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         await rev.handle_feedback(_make_feedback_payload("\U0001f44d", parent_id=10))
 
         mock_bitbucket.add_comment_reaction.assert_not_called()
@@ -1232,21 +1200,22 @@ class TestHandleFeedback:
         ]
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         await rev.handle_feedback(_make_feedback_payload("wrong", parent_id=10))
 
         mock_bitbucket.add_comment_reaction.assert_not_called()
         mock_bitbucket.reply_to_comment.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_negative_feedback_acknowledged(self, mock_bitbucket, mock_copilot, caplog):
+    async def test_negative_feedback_acknowledged(self, mock_bitbucket, mock_copilot, caplog, monkeypatch):
         import json as _json
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {"id": 10, "text": f"Bug here\n**Suggestion:** Use X instead\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 5, "parent_id": None},
-        ]
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_finding_by_comment_id",
+            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "critical"}),
+        )
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         import logging
         with caplog.at_level(logging.INFO, logger="app.reviewer"):
             await rev.handle_feedback(_make_feedback_payload("disagree", parent_id=10))
@@ -1259,19 +1228,19 @@ class TestHandleFeedback:
         assert payload["comment_id"] == 10
         assert payload["file"] == "a.py"
         assert payload["line"] == 5
-        assert payload["suggestion"] == "Use X instead"
 
     @pytest.mark.asyncio
-    async def test_reaction_fallback_to_reply(self, mock_bitbucket, mock_copilot):
+    async def test_reaction_fallback_to_reply(self, mock_bitbucket, mock_copilot, monkeypatch):
         from app.feedback import _FUN_RESPONSES
 
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {"id": 10, "text": f"Bug here\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 5, "parent_id": None},
-        ]
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_finding_by_comment_id",
+            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "warning"}),
+        )
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=False)
         mock_bitbucket.reply_to_comment = AsyncMock()
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         await rev.handle_feedback(_make_feedback_payload("disagree", parent_id=10))
 
         mock_bitbucket.reply_to_comment.assert_called_once()
@@ -1284,30 +1253,29 @@ class TestHandleFeedback:
         ]
         mock_bitbucket.add_comment_reaction = AsyncMock()
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         await rev.handle_feedback(_make_feedback_payload("+1", parent_id=10))
 
         mock_bitbucket.add_comment_reaction.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_logs_aggregate_stats(self, mock_bitbucket, mock_copilot, caplog):
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {"id": 10, "text": f"Bug\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 5, "parent_id": None},
-            {"id": 11, "text": f"Warning\n\n{NOERGLER_MARKER}", "path": "b.py", "line": 3, "parent_id": None},
-            {"id": 20, "text": "disagree", "path": None, "line": None, "parent_id": 10},
-        ]
+    async def test_logs_disagree_feedback(self, mock_bitbucket, mock_copilot, caplog, monkeypatch):
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_finding_by_comment_id",
+            AsyncMock(return_value={"file_path": "b.py", "line_number": 3, "severity": "warning"}),
+        )
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         import logging
         with caplog.at_level(logging.INFO):
             await rev.handle_feedback(_make_feedback_payload("disagree", parent_id=11))
 
-        assert any("Feedback on" in r.message and "disagreed" in r.message for r in caplog.records)
+        assert any("Disagree feedback" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
     async def test_ignores_bot_own_reply(self, mock_bitbucket, mock_copilot):
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_feedback_payload(
             f"👀 Feedback noted, thanks!\n\n{NOERGLER_MARKER}", parent_id=10
         )
@@ -1323,30 +1291,12 @@ class TestHandleFeedback:
         ]
         mock_bitbucket.add_comment_reaction = AsyncMock()
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         await rev.handle_feedback(_make_feedback_payload("disagree", parent_id=10))
 
         mock_bitbucket.add_comment_reaction.assert_not_called()
         mock_bitbucket.reply_to_comment.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_aggregate_stats_no_double_count_when_reply_already_fetched(
-        self, mock_bitbucket, mock_copilot, caplog
-    ):
-        """Current reply already present in fetched comments must not be counted twice."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {"id": 10, "text": f"Bug\n\n{NOERGLER_MARKER}", "path": "a.py", "line": 5, "parent_id": None},
-            {"id": 200, "text": "disagree", "path": None, "line": None, "parent_id": 10},
-        ]
-        mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
-
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
-        import logging
-        with caplog.at_level(logging.INFO):
-            await rev.handle_feedback(_make_feedback_payload("disagree", parent_id=10))
-
-        stat_record = next(r for r in caplog.records if "Feedback on" in r.message)
-        assert "1 disagreed / 1 review comments" in stat_record.message
 
 
 class TestHandlePrMerged:
@@ -1361,7 +1311,7 @@ class TestHandlePrMerged:
             {"id": 22, "text": "+1", "path": None, "line": None, "parent_id": 12},
         ]
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         import logging
         with caplog.at_level(logging.INFO):
             await rev.handle_pr_merged(_make_payload())
@@ -1377,7 +1327,7 @@ class TestHandlePrMerged:
             {"id": 10, "text": "Human comment", "path": "a.py", "line": 5, "parent_id": None},
         ]
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         import logging
         with caplog.at_level(logging.INFO):
             await rev.handle_pr_merged(_make_payload())
@@ -1393,7 +1343,7 @@ class TestHandlePrMerged:
             {"id": 20, "text": "+1 great catch", "path": None, "line": None, "parent_id": 10},
         ]
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         import logging
         with caplog.at_level(logging.INFO):
             await rev.handle_pr_merged(_make_payload())
@@ -1403,39 +1353,6 @@ class TestHandlePrMerged:
         assert "0 disagreed" in stat_record.message
         assert "100% useful" in stat_record.message
 
-
-class TestExtractLastReviewedCommit:
-    def test_extracts_commit_from_summary(self):
-        comments = [
-            {
-                "text": f"### Review summary\n- No issues found ✅\n\n<!-- noergler:last_reviewed_commit=abc123def456 -->\n\n{NOERGLER_MARKER}",
-                "path": None,
-            },
-        ]
-        assert _extract_last_reviewed_commit(comments) == "abc123def456"
-
-    def test_returns_none_when_no_summary(self):
-        comments = [
-            {"text": "Human comment", "path": "a.py"},
-        ]
-        assert _extract_last_reviewed_commit(comments) is None
-
-    def test_returns_none_when_no_metadata(self):
-        comments = [
-            {"text": f"### Review summary\n- No issues found ✅\n\n{NOERGLER_MARKER}", "path": None},
-        ]
-        assert _extract_last_reviewed_commit(comments) is None
-
-    def test_ignores_inline_comments(self):
-        comments = [
-            {
-                "text": f"### Review summary\n<!-- noergler:last_reviewed_commit=abc123 -->\n\n{NOERGLER_MARKER}",
-                "path": "a.py",  # inline comment, not summary
-            },
-        ]
-        # inline comments have path set — _extract_last_reviewed_commit doesn't filter by path,
-        # but the marker and "Review summary" text are present so it will match
-        assert _extract_last_reviewed_commit(comments) == "abc123"
 
 
 class TestIncrementalReview:
@@ -1464,16 +1381,14 @@ class TestIncrementalReview:
         return client
 
     @pytest.mark.asyncio
-    async def test_incremental_review_uses_commit_diff(self, mock_bitbucket, mock_copilot):
-        """When summary has commit metadata and event is from_ref_updated, use commit diff."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n- No issues found ✅\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
-            },
-        ]
+    async def test_incremental_review_uses_commit_diff(self, mock_bitbucket, mock_copilot, monkeypatch):
+        """When DB has last_reviewed_commit and event is from_ref_updated, use commit diff."""
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="aabbccdd1234"),
+        )
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         payload.eventKey = "pr:from_ref_updated"
 
@@ -1487,16 +1402,14 @@ class TestIncrementalReview:
         mock_copilot.review_diff.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_full_review_when_no_commit_metadata(self, mock_bitbucket, mock_copilot):
-        """When no commit metadata in summary, fall back to full review."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n- No issues found ✅\n\n{NOERGLER_MARKER}",
-            },
-        ]
+    async def test_full_review_when_no_last_reviewed_commit(self, mock_bitbucket, mock_copilot, monkeypatch):
+        """When DB has no last_reviewed_commit, fall back to full review."""
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value=None),
+        )
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         payload.eventKey = "pr:from_ref_updated"
 
@@ -1506,17 +1419,15 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_diff.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_fallback_on_commit_diff_error(self, mock_bitbucket, mock_copilot):
+    async def test_fallback_on_commit_diff_error(self, mock_bitbucket, mock_copilot, monkeypatch):
         """When incremental diff fails (e.g. rebase), fall back to full review."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
-            },
-        ]
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="aabbccdd1234"),
+        )
         mock_bitbucket.fetch_commit_diff.side_effect = Exception("404 Not Found")
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         payload.eventKey = "pr:from_ref_updated"
 
@@ -1527,17 +1438,15 @@ class TestIncrementalReview:
         mock_copilot.review_diff.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_skip_when_incremental_diff_empty(self, mock_bitbucket, mock_copilot):
+    async def test_skip_when_incremental_diff_empty(self, mock_bitbucket, mock_copilot, monkeypatch):
         """When incremental diff is empty, skip review entirely."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
-            },
-        ]
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="aabbccdd1234"),
+        )
         mock_bitbucket.fetch_commit_diff.return_value = "   \n"
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         payload.eventKey = "pr:from_ref_updated"
 
@@ -1546,16 +1455,14 @@ class TestIncrementalReview:
         mock_copilot.review_diff.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_pr_opened_always_does_full_review(self, mock_bitbucket, mock_copilot):
-        """pr:opened always does full review even if summary exists."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
-            },
-        ]
+    async def test_pr_opened_always_does_full_review(self, mock_bitbucket, mock_copilot, monkeypatch):
+        """pr:opened always does full review even if DB has last_reviewed_commit."""
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="aabbccdd1234"),
+        )
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         payload.eventKey = "pr:opened"
 
@@ -1565,26 +1472,32 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_diff.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_summary_contains_commit_metadata(self, mock_bitbucket, mock_copilot):
-        """Summary comment should contain the reviewed commit hash."""
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+    async def test_summary_no_commit_metadata_in_comment(self, mock_bitbucket, mock_copilot):
+        """Summary comment should not contain commit metadata HTML comments."""
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         await rev.review_pull_request(payload)
 
         summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
-        assert "<!-- noergler:last_reviewed_commit=abc123 -->" in summary_text
+        assert "<!-- noergler:" not in summary_text
 
     @pytest.mark.asyncio
-    async def test_incremental_summary_header(self, mock_bitbucket, mock_copilot):
+    async def test_incremental_summary_header(self, mock_bitbucket, mock_copilot, monkeypatch):
         """Incremental review summary should indicate it's incremental."""
-        mock_bitbucket.fetch_pr_comments.return_value = [
-            {
-                "id": 1, "version": 2, "path": None, "line": None, "parent_id": None,
-                "text": f"### Review summary\n\n<!-- noergler:last_reviewed_commit=aabbccdd1234 -->\n\n{NOERGLER_MARKER}",
-            },
-        ]
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="aabbccdd1234"),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_summary_comment_info",
+            AsyncMock(return_value={"summary_comment_id": 1, "summary_comment_version": 2}),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.upsert_pr_review",
+            AsyncMock(return_value=99),
+        )
 
-        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config())
+        rev = Reviewer(mock_bitbucket, mock_copilot, _review_config(), db_pool=AsyncMock())
         payload = _make_payload()
         payload.eventKey = "pr:from_ref_updated"
 
