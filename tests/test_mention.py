@@ -46,7 +46,7 @@ def _make_mention_payload(
 @pytest.fixture
 def mock_bitbucket():
     client = AsyncMock()
-    client.bot_username = None
+    client.bot_username = "noergler"
     client.fetch_pr_diff = AsyncMock(return_value="diff --git a/file.py b/file.py\n+hello\n")
     client.fetch_file_content = AsyncMock(return_value="hello\n")
     client.fetch_pr_comments = AsyncMock(return_value=[])

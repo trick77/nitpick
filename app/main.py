@@ -185,7 +185,7 @@ async def webhook(
         comment_id = payload_json.get("comment", {}).get("id")
         parent_id = payload_json.get("commentParentId")
         logger.info("Comment event: id=%s parentId=%s", comment_id, parent_id)
-        trigger = f"@{config.review.mention_trigger}"
+        trigger = f"@{config.bitbucket.username}"
         if trigger.lower() in comment_text.lower():
             background_tasks.add_task(reviewer.handle_mention, payload)
             return {"status": "accepted", "reason": "mention"}

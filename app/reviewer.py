@@ -104,7 +104,7 @@ class Reviewer:
         self.db_pool = db_pool
         self.auto_review_authors = review_config.auto_review_authors
         self.max_comments = review_config.max_comments
-        self.mention_trigger = review_config.mention_trigger
+        self.mention_trigger = bitbucket.bot_username
         self.ramsay_authors = review_config.ramsay_authors
 
     @staticmethod

@@ -33,7 +33,6 @@ class ReviewConfig(BaseModel):
     diff_allow_dynamic_context: bool = True
     review_prompt_template: str = "prompts/review.txt"
     ramsay_authors: list[str] = []
-    mention_trigger: str = "noergler"
     mention_prompt_template: str = "prompts/mention.txt"
     ticket_compliance_check: bool = True
 
@@ -126,7 +125,6 @@ def load_config() -> AppConfig:
             diff_allow_dynamic_context=_env("REVIEW_DIFF_ALLOW_DYNAMIC_CONTEXT", "true").lower() in ("true", "1", "yes"),
             review_prompt_template=_env("REVIEW_PROMPT_TEMPLATE", "prompts/review.txt"),
             ramsay_authors=_env("REVIEW_RAMSAY_AUTHORS", ""),
-            mention_trigger=_env("REVIEW_MENTION_TRIGGER", "noergler"),
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
             ticket_compliance_check=_env("REVIEW_TICKET_COMPLIANCE_CHECK", "true").lower() in ("true", "1", "yes"),
         ),
