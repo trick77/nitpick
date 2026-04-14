@@ -133,24 +133,29 @@ alembic upgrade head
 
 2. Set the generated value as `BITBUCKET_WEBHOOK_SECRET` in your `.env` file. This same value must be configured on Bitbucket's side — the service and Bitbucket share the HMAC secret.
 
-### Automated provisioning (recommended)
+### Automated onboarding (recommended)
 
-Use `scripts/provision_repo.py` to create/update the webhook on one or more repos in a single, idempotent command. It verifies token permissions, reconciles the webhook configuration, and triggers Bitbucket's built-in connectivity test.
+Use `scripts/onboard_repo.py` to create/update the webhook on one or more repos in a single, idempotent command. It verifies token permissions, reconciles the webhook configuration, and triggers Bitbucket's built-in connectivity test.
 
 ```bash
-python -m scripts.provision_repo config.json [--name noergler] [--dry-run] [--env-file PATH]
+python -m scripts.onboard_repo config.json [--name noergler] [--dry-run] [--env-file PATH]
 ```
 
-Example `config.json`:
+Example `config.json` — repos are grouped under their Bitbucket project:
 
 ```json
 {
   "bitbucket_url": "https://bitbucket.example.com",
   "webhook_url": "https://noergler.internal/webhook",
-  "repos": [
-    { "project": "PROJ",     "repo": "payments-service" },
-    { "project": "PROJ",     "repo": "ledger-api" },
-    { "project": "PLATFORM", "repo": "auth-gateway" }
+  "projects": [
+    {
+      "project": "PROJ",
+      "repos": ["payments-service", "ledger-api"]
+    },
+    {
+      "project": "PLATFORM",
+      "repos": ["auth-gateway"]
+    }
   ]
 }
 ```

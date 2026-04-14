@@ -7,11 +7,11 @@ import respx
 
 from app.bitbucket import BitbucketClient
 from app.config import REQUIRED_WEBHOOK_EVENTS, BitbucketConfig
-from scripts.provision_repo import (
+from scripts.onboard_repo import (
     DEFAULT_WEBHOOK_NAME,
+    RepoOnboarder,
     RepoSpec,
-    WebhookProvisioner,
-    load_provision_input,
+    load_onboarding_input,
     main,
     resolve_secrets,
 )
@@ -37,8 +37,8 @@ def client(bb_config):
 
 
 @pytest.fixture
-def provisioner(client):
-    return WebhookProvisioner(
+def onboarder(client):
+    return RepoOnboarder(
         client,
         webhook_url=WEBHOOK_URL,
         webhook_secret="whsec",
@@ -55,7 +55,7 @@ def spec():
 # JSON config validation
 # --------------------------------------------------------------------------- #
 
-class TestLoadProvisionInput:
+class TestLoadOnboardingInput:
     def _write(self, tmp_path: Path, data) -> Path:
         p = tmp_path / "config.json"
         p.write_text(json.dumps(data))
@@ -65,70 +65,98 @@ class TestLoadProvisionInput:
         path = self._write(tmp_path, {
             "bitbucket_url": "https://bb.example.com",
             "webhook_url": "https://noergler/webhook",
-            "repos": [
-                {"project": "A", "repo": "one"},
-                {"project": "A", "repo": "two"},
+            "projects": [
+                {"project": "A", "repos": ["one", "two"]},
+                {"project": "B", "repos": ["three"]},
             ],
         })
-        result = load_provision_input(path)
+        result = load_onboarding_input(path)
         assert result.bitbucket_url == "https://bb.example.com"
         assert result.webhook_url == "https://noergler/webhook"
-        assert [r.key for r in result.repos] == ["A/one", "A/two"]
+        assert [r.key for r in result.repos] == ["A/one", "A/two", "B/three"]
 
     def test_strips_trailing_slash_on_bitbucket_url(self, tmp_path):
         path = self._write(tmp_path, {
             "bitbucket_url": "https://bb.example.com/",
             "webhook_url": "https://x/webhook",
-            "repos": [{"project": "A", "repo": "one"}],
+            "projects": [{"project": "A", "repos": ["one"]}],
         })
-        assert load_provision_input(path).bitbucket_url == "https://bb.example.com"
+        assert load_onboarding_input(path).bitbucket_url == "https://bb.example.com"
 
     def test_rejects_http_bitbucket_url(self, tmp_path):
         path = self._write(tmp_path, {
             "bitbucket_url": "http://bb",
             "webhook_url": "https://x/webhook",
-            "repos": [{"project": "A", "repo": "one"}],
+            "projects": [{"project": "A", "repos": ["one"]}],
         })
         with pytest.raises(SystemExit, match="bitbucket_url"):
-            load_provision_input(path)
+            load_onboarding_input(path)
 
     def test_rejects_missing_webhook_url(self, tmp_path):
         path = self._write(tmp_path, {
             "bitbucket_url": "https://bb",
-            "repos": [{"project": "A", "repo": "one"}],
+            "projects": [{"project": "A", "repos": ["one"]}],
         })
         with pytest.raises(SystemExit, match="webhook_url"):
-            load_provision_input(path)
+            load_onboarding_input(path)
 
-    def test_rejects_empty_repos(self, tmp_path):
+    def test_rejects_missing_projects(self, tmp_path):
         path = self._write(tmp_path, {
             "bitbucket_url": "https://bb",
             "webhook_url": "https://x/webhook",
-            "repos": [],
+        })
+        with pytest.raises(SystemExit, match="projects"):
+            load_onboarding_input(path)
+
+    def test_rejects_empty_projects_list(self, tmp_path):
+        path = self._write(tmp_path, {
+            "bitbucket_url": "https://bb",
+            "webhook_url": "https://x/webhook",
+            "projects": [],
+        })
+        with pytest.raises(SystemExit, match="projects"):
+            load_onboarding_input(path)
+
+    def test_rejects_empty_repos_under_project(self, tmp_path):
+        path = self._write(tmp_path, {
+            "bitbucket_url": "https://bb",
+            "webhook_url": "https://x/webhook",
+            "projects": [{"project": "A", "repos": []}],
         })
         with pytest.raises(SystemExit, match="repos"):
-            load_provision_input(path)
+            load_onboarding_input(path)
 
     def test_rejects_duplicate_repos(self, tmp_path):
         path = self._write(tmp_path, {
             "bitbucket_url": "https://bb",
             "webhook_url": "https://x/webhook",
-            "repos": [
-                {"project": "A", "repo": "one"},
-                {"project": "A", "repo": "one"},
+            "projects": [
+                {"project": "A", "repos": ["one", "one"]},
             ],
         })
         with pytest.raises(SystemExit, match="duplicate"):
-            load_provision_input(path)
+            load_onboarding_input(path)
 
-    def test_rejects_missing_repo_field(self, tmp_path):
+    def test_rejects_duplicate_across_project_entries(self, tmp_path):
         path = self._write(tmp_path, {
             "bitbucket_url": "https://bb",
             "webhook_url": "https://x/webhook",
-            "repos": [{"project": "A"}],
+            "projects": [
+                {"project": "A", "repos": ["one"]},
+                {"project": "A", "repos": ["one"]},
+            ],
         })
-        with pytest.raises(SystemExit, match="repo"):
-            load_provision_input(path)
+        with pytest.raises(SystemExit, match="duplicate"):
+            load_onboarding_input(path)
+
+    def test_rejects_missing_project_field(self, tmp_path):
+        path = self._write(tmp_path, {
+            "bitbucket_url": "https://bb",
+            "webhook_url": "https://x/webhook",
+            "projects": [{"repos": ["one"]}],
+        })
+        with pytest.raises(SystemExit, match="project"):
+            load_onboarding_input(path)
 
 
 # --------------------------------------------------------------------------- #
@@ -175,13 +203,11 @@ class TestResolveSecrets:
         )
         monkeypatch.chdir(tmp_path)
 
-        # --env-file alone loses to cwd .env.
         monkeypatch.delenv("BITBUCKET_TOKEN", raising=False)
         monkeypatch.delenv("BITBUCKET_WEBHOOK_SECRET", raising=False)
         token, secret = resolve_secrets(env_file)
         assert (token, secret) == ("cwd-token", "cwd-secret")
 
-        # Process env wins over both.
         monkeypatch.setenv("BITBUCKET_TOKEN", "env-token")
         monkeypatch.setenv("BITBUCKET_WEBHOOK_SECRET", "env-secret")
         token, secret = resolve_secrets(env_file)
@@ -196,37 +222,37 @@ class TestResolveSecrets:
 
 
 # --------------------------------------------------------------------------- #
-# WebhookProvisioner
+# RepoOnboarder
 # --------------------------------------------------------------------------- #
 
 class TestVerifyPermissions:
     @pytest.mark.asyncio
     @respx.mock
-    async def test_ok(self, provisioner, spec, client):
+    async def test_ok(self, onboarder, spec, client):
         respx.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo").mock(
             return_value=httpx.Response(200, json={"slug": "my-repo"})
         )
         respx.get(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/pull-requests"
         ).mock(return_value=httpx.Response(200, json={"values": []}))
-        await provisioner.verify_permissions(spec)
+        await onboarder.verify_permissions(spec)
         await client.close()
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_403_raises(self, provisioner, spec, client):
+    async def test_403_raises(self, onboarder, spec, client):
         respx.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo").mock(
             return_value=httpx.Response(403, text="Forbidden")
         )
         with pytest.raises(httpx.HTTPStatusError):
-            await provisioner.verify_permissions(spec)
+            await onboarder.verify_permissions(spec)
         await client.close()
 
 
 class TestUpsertWebhook:
     @pytest.mark.asyncio
     @respx.mock
-    async def test_creates_when_absent(self, provisioner, spec, client):
+    async def test_creates_when_absent(self, onboarder, spec, client):
         respx.get(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
         ).mock(return_value=httpx.Response(200, json={"values": [], "isLastPage": True}))
@@ -234,7 +260,7 @@ class TestUpsertWebhook:
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
         ).mock(return_value=httpx.Response(200, json={"id": 42}))
 
-        webhook_id, diff = await provisioner.upsert_webhook(spec)
+        webhook_id, diff = await onboarder.upsert_webhook(spec)
 
         assert webhook_id == 42
         assert diff == ["create"]
@@ -249,7 +275,7 @@ class TestUpsertWebhook:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_no_op_when_up_to_date(self, provisioner, spec, client):
+    async def test_no_op_when_up_to_date(self, onboarder, spec, client):
         respx.get(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
         ).mock(return_value=httpx.Response(200, json={
@@ -264,14 +290,14 @@ class TestUpsertWebhook:
             "isLastPage": True,
         }))
 
-        webhook_id, diff = await provisioner.upsert_webhook(spec)
+        webhook_id, diff = await onboarder.upsert_webhook(spec)
         assert webhook_id == 7
         assert diff == []
         await client.close()
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_updates_on_drift(self, provisioner, spec, client):
+    async def test_updates_on_drift(self, onboarder, spec, client):
         respx.get(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
         ).mock(return_value=httpx.Response(200, json={
@@ -279,7 +305,7 @@ class TestUpsertWebhook:
                 "id": 7,
                 "name": DEFAULT_WEBHOOK_NAME,
                 "url": "https://stale.example/webhook",
-                "events": ["pr:opened"],  # missing events
+                "events": ["pr:opened"],
                 "active": True,
                 "configuration": {"secret": "x"},
             }],
@@ -289,7 +315,7 @@ class TestUpsertWebhook:
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7"
         ).mock(return_value=httpx.Response(200, json={"id": 7}))
 
-        webhook_id, diff = await provisioner.upsert_webhook(spec)
+        webhook_id, diff = await onboarder.upsert_webhook(spec)
         assert webhook_id == 7
         assert any("url" in d for d in diff)
         assert any("events" in d for d in diff)
@@ -299,7 +325,7 @@ class TestUpsertWebhook:
     @pytest.mark.asyncio
     @respx.mock
     async def test_dry_run_skips_writes(self, client, spec):
-        p = WebhookProvisioner(
+        p = RepoOnboarder(
             client, webhook_url=WEBHOOK_URL, webhook_secret="whsec", dry_run=True,
         )
         respx.get(
@@ -319,29 +345,29 @@ class TestUpsertWebhook:
 class TestTestWebhook:
     @pytest.mark.asyncio
     @respx.mock
-    async def test_success_returns_200(self, provisioner, spec, client):
+    async def test_success_returns_200(self, onboarder, spec, client):
         respx.post(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test"
         ).mock(return_value=httpx.Response(200, json={"statusCode": 200}))
-        assert await provisioner.test_webhook(spec, 7) == 200
+        assert await onboarder.test_webhook(spec, 7) == 200
         await client.close()
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_downstream_401_reported(self, provisioner, spec, client):
+    async def test_downstream_401_reported(self, onboarder, spec, client):
         respx.post(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test"
         ).mock(return_value=httpx.Response(200, json={"statusCode": 401}))
-        assert await provisioner.test_webhook(spec, 7) == 401
+        assert await onboarder.test_webhook(spec, 7) == 401
         await client.close()
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_bitbucket_side_failure(self, provisioner, spec, client):
+    async def test_bitbucket_side_failure(self, onboarder, spec, client):
         respx.post(
             f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test"
         ).mock(return_value=httpx.Response(500, text="boom"))
-        assert await provisioner.test_webhook(spec, 7) == 500
+        assert await onboarder.test_webhook(spec, 7) == 500
         await client.close()
 
 
@@ -355,9 +381,8 @@ class TestMain:
         cfg.write_text(json.dumps({
             "bitbucket_url": BASE_URL,
             "webhook_url": WEBHOOK_URL,
-            "repos": [
-                {"project": "PROJ", "repo": "good"},
-                {"project": "PROJ", "repo": "bad"},
+            "projects": [
+                {"project": "PROJ", "repos": ["good", "bad"]},
             ],
         }))
         monkeypatch.setenv("BITBUCKET_TOKEN", "t")
@@ -365,7 +390,6 @@ class TestMain:
         monkeypatch.chdir(tmp_path)
 
         with respx.mock(assert_all_called=False) as mock:
-            # good repo
             mock.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good").mock(
                 return_value=httpx.Response(200, json={})
             )
@@ -381,21 +405,20 @@ class TestMain:
             mock.post(
                 f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good/webhooks/1/test"
             ).mock(return_value=httpx.Response(200, json={"statusCode": 200}))
-            # bad repo — permission failure
             mock.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/bad").mock(
                 return_value=httpx.Response(404, text="no repo")
             )
 
             rc = main([str(cfg)])
 
-        assert rc == 1  # one failure → non-zero exit
+        assert rc == 1
 
-    def test_dry_run_issues_no_writes(self, tmp_path, monkeypatch):
+    def test_dry_run_issues_no_writes(self, tmp_path, monkeypatch, capsys):
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({
             "bitbucket_url": BASE_URL,
             "webhook_url": WEBHOOK_URL,
-            "repos": [{"project": "PROJ", "repo": "r"}],
+            "projects": [{"project": "PROJ", "repos": ["r"]}],
         }))
         monkeypatch.setenv("BITBUCKET_TOKEN", "t")
         monkeypatch.setenv("BITBUCKET_WEBHOOK_SECRET", "s")
@@ -423,3 +446,6 @@ class TestMain:
         assert rc == 0
         assert not create_route.called
         assert not test_route.called
+        out = capsys.readouterr().out
+        assert "PROJ/r" in out
+        assert "ok" in out

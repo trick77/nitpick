@@ -1,8 +1,8 @@
 """
-Provision a Bitbucket Server repository for noergler webhook delivery.
+Onboard a Bitbucket Server repository to noergler webhook delivery.
 
 Usage:
-    python -m scripts.provision_repo config.json [--name noergler] [--dry-run] [--env-file PATH]
+    python -m scripts.onboard_repo config.json [--name noergler] [--dry-run] [--env-file PATH]
 
 The JSON config describes target repos and URLs. Secrets (BITBUCKET_TOKEN,
 BITBUCKET_WEBHOOK_SECRET) are resolved from, in order:
@@ -32,7 +32,7 @@ import httpx
 from app.bitbucket import BitbucketClient
 from app.config import REQUIRED_WEBHOOK_EVENTS, BitbucketConfig
 
-logger = logging.getLogger("provision_repo")
+logger = logging.getLogger("onboard_repo")
 
 DEFAULT_WEBHOOK_NAME = "noergler"
 
@@ -52,7 +52,7 @@ class RepoSpec:
 
 
 @dataclass(frozen=True)
-class ProvisionInput:
+class OnboardingInput:
     bitbucket_url: str
     webhook_url: str
     repos: list[RepoSpec]
@@ -112,7 +112,7 @@ def _mask(secret: str) -> str:
     return f"{secret[:4]}-****"
 
 
-def load_provision_input(path: Path) -> ProvisionInput:
+def load_onboarding_input(path: Path) -> OnboardingInput:
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -123,29 +123,37 @@ def load_provision_input(path: Path) -> ProvisionInput:
 
     bitbucket_url = _require_https(data.get("bitbucket_url"), "bitbucket_url")
     webhook_url = _require_url(data.get("webhook_url"), "webhook_url")
-    repos_raw = data.get("repos")
+    projects_raw = data.get("projects")
 
-    if not isinstance(repos_raw, list) or not repos_raw:
-        raise SystemExit("ERROR: 'repos' must be a non-empty list")
+    if not isinstance(projects_raw, list) or not projects_raw:
+        raise SystemExit("ERROR: 'projects' must be a non-empty list")
 
     seen: set[tuple[str, str]] = set()
     repos: list[RepoSpec] = []
-    for idx, entry in enumerate(repos_raw):
+    for p_idx, entry in enumerate(projects_raw):
         if not isinstance(entry, dict):
-            raise SystemExit(f"ERROR: repos[{idx}] must be an object")
+            raise SystemExit(f"ERROR: projects[{p_idx}] must be an object")
         project = entry.get("project")
-        repo = entry.get("repo")
+        repos_list = entry.get("repos")
         if not isinstance(project, str) or not project.strip():
-            raise SystemExit(f"ERROR: repos[{idx}].project must be a non-empty string")
-        if not isinstance(repo, str) or not repo.strip():
-            raise SystemExit(f"ERROR: repos[{idx}].repo must be a non-empty string")
-        key = (project.strip(), repo.strip())
-        if key in seen:
-            raise SystemExit(f"ERROR: duplicate repo entry: {key[0]}/{key[1]}")
-        seen.add(key)
-        repos.append(RepoSpec(project=key[0], repo=key[1]))
+            raise SystemExit(f"ERROR: projects[{p_idx}].project must be a non-empty string")
+        if not isinstance(repos_list, list) or not repos_list:
+            raise SystemExit(
+                f"ERROR: projects[{p_idx}].repos must be a non-empty list of repo slugs"
+            )
+        project_key = project.strip()
+        for r_idx, repo in enumerate(repos_list):
+            if not isinstance(repo, str) or not repo.strip():
+                raise SystemExit(
+                    f"ERROR: projects[{p_idx}].repos[{r_idx}] must be a non-empty string"
+                )
+            key = (project_key, repo.strip())
+            if key in seen:
+                raise SystemExit(f"ERROR: duplicate repo entry: {key[0]}/{key[1]}")
+            seen.add(key)
+            repos.append(RepoSpec(project=key[0], repo=key[1]))
 
-    return ProvisionInput(
+    return OnboardingInput(
         bitbucket_url=bitbucket_url.rstrip("/"),
         webhook_url=webhook_url,
         repos=repos,
@@ -171,7 +179,7 @@ def _require_url(value: Any, field_name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Provisioner
+# Onboarder
 # --------------------------------------------------------------------------- #
 
 @dataclass
@@ -183,7 +191,7 @@ class RepoResult:
     diff: list[str] = field(default_factory=list)
 
 
-class WebhookProvisioner:
+class RepoOnboarder:
     def __init__(
         self,
         client: BitbucketClient,
@@ -282,7 +290,7 @@ class WebhookProvisioner:
         return int(downstream) if isinstance(downstream, int) else response.status_code
 
     # -- Orchestrator -- #
-    async def provision(self, spec: RepoSpec) -> RepoResult:
+    async def onboard(self, spec: RepoSpec) -> RepoResult:
         try:
             await self.verify_permissions(spec)
         except httpx.HTTPStatusError as exc:
@@ -340,15 +348,15 @@ def _redact(body: dict) -> dict:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.provision_repo",
-        description="Provision noergler webhooks on Bitbucket Server repos (idempotent).",
+        prog="python -m scripts.onboard_repo",
+        description="Onboard Bitbucket Server repos to noergler by creating/updating their webhooks (idempotent).",
         epilog=(
             "Write permission check is implicit: if the token lacks repo-write, the webhook "
             "create/update will surface a 403. BITBUCKET_WEBHOOK_SECRET must match the value "
             "configured on the running noergler service."
         ),
     )
-    parser.add_argument("config", type=Path, help="Path to provisioning JSON config")
+    parser.add_argument("config", type=Path, help="Path to onboarding JSON config")
     parser.add_argument("--name", default=DEFAULT_WEBHOOK_NAME, help=f"Webhook name (default: {DEFAULT_WEBHOOK_NAME})")
     parser.add_argument("--dry-run", action="store_true", help="Print planned changes without mutating Bitbucket")
     parser.add_argument("--env-file", type=Path, default=None, help="Additional .env file to read secrets from")
@@ -368,7 +376,7 @@ def _print_summary(results: list[RepoResult]) -> None:
 
 async def _run(args: argparse.Namespace) -> int:
     token, webhook_secret = resolve_secrets(args.env_file)
-    inp = load_provision_input(args.config)
+    inp = load_onboarding_input(args.config)
 
     logger.info("Bitbucket URL: %s", inp.bitbucket_url)
     logger.info("Webhook URL:   %s", inp.webhook_url)
@@ -383,10 +391,10 @@ async def _run(args: argparse.Namespace) -> int:
         token=token,
         webhook_secret=webhook_secret,
         username=getattr(resolve_secrets, "_resolved", {}).get("BITBUCKET_USERNAME")
-        or os.environ.get("BITBUCKET_USERNAME", "noergler-provision"),
+        or os.environ.get("BITBUCKET_USERNAME", "noergler-onboard"),
     )
     client = BitbucketClient(bb_config)
-    provisioner = WebhookProvisioner(
+    onboarder = RepoOnboarder(
         client,
         webhook_url=inp.webhook_url,
         webhook_secret=webhook_secret,
@@ -399,7 +407,7 @@ async def _run(args: argparse.Namespace) -> int:
         for spec in inp.repos:
             logger.info("--- %s ---", spec.key)
             try:
-                result = await provisioner.provision(spec)
+                result = await onboarder.onboard(spec)
             except Exception as exc:  # noqa: BLE001 — per-repo isolation
                 logger.exception("[%s] unexpected error", spec.key)
                 result = RepoResult(spec, "failed", detail=f"unexpected: {exc}")
