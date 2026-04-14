@@ -164,6 +164,8 @@ Example `config.json`:
 
 **Behaviour.** Each repo runs through three steps: verify read access, create-or-update the webhook (idempotent — re-running prints `already up to date`), then trigger Bitbucket's test endpoint and report the downstream status. A failure on one repo logs and continues to the next; the script exits non-zero iff any repo failed, and prints a final summary table.
 
+**Known limitation — secret-only drift.** Bitbucket's webhook API does not return the stored secret, so the script cannot detect when *only* the secret has changed on one side. If you rotate `BITBUCKET_WEBHOOK_SECRET` on the service side, delete the webhook in Bitbucket (or rename it so this script recreates it) before re-running — otherwise the script will report `already up to date` while Bitbucket continues signing with the old secret.
+
 ### Manual setup (fallback)
 
 In Bitbucket Server, go to **Repository settings > Webhooks > Create webhook**:

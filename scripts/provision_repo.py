@@ -78,18 +78,22 @@ def _load_env_file(path: Path) -> dict[str, str]:
 
 
 def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
-    """Return (BITBUCKET_TOKEN, BITBUCKET_WEBHOOK_SECRET). Raises SystemExit on missing."""
+    """Return (BITBUCKET_TOKEN, BITBUCKET_WEBHOOK_SECRET).
+
+    Precedence (first match wins): process env > cwd .env > --env-file.
+    Raises SystemExit on missing.
+    """
+    # Build the map in reverse-precedence order so later updates (= higher
+    # priority) overwrite earlier ones.
     merged: dict[str, str] = {}
-    cwd_env = _load_env_file(Path.cwd() / ".env")
-    merged.update(cwd_env)
     if env_file is not None:
         merged.update(_load_env_file(env_file))
-    # Process env wins over file-based env — so explicit exports override .env.
-    # But user plan says: env > .env > --env-file (first match wins).
-    # Apply that by giving process env highest priority.
-    for k in ("BITBUCKET_TOKEN", "BITBUCKET_WEBHOOK_SECRET"):
+    merged.update(_load_env_file(Path.cwd() / ".env"))
+    for k in ("BITBUCKET_TOKEN", "BITBUCKET_WEBHOOK_SECRET", "BITBUCKET_USERNAME"):
         if k in os.environ and os.environ[k]:
             merged[k] = os.environ[k]
+    # Stash the resolved env for later use (e.g. BITBUCKET_USERNAME lookup).
+    resolve_secrets._resolved = merged  # type: ignore[attr-defined]
 
     missing = [k for k in ("BITBUCKET_TOKEN", "BITBUCKET_WEBHOOK_SECRET") if not merged.get(k)]
     if missing:
@@ -378,7 +382,8 @@ async def _run(args: argparse.Namespace) -> int:
         base_url=inp.bitbucket_url,
         token=token,
         webhook_secret=webhook_secret,
-        username=os.environ.get("BITBUCKET_USERNAME", "noergler-provision"),
+        username=getattr(resolve_secrets, "_resolved", {}).get("BITBUCKET_USERNAME")
+        or os.environ.get("BITBUCKET_USERNAME", "noergler-provision"),
     )
     client = BitbucketClient(bb_config)
     provisioner = WebhookProvisioner(

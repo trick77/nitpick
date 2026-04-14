@@ -164,6 +164,29 @@ class TestResolveSecrets:
         token, secret = resolve_secrets(None)
         assert (token, secret) == ("cwd-token", "cwd-secret")
 
+    def test_precedence_env_beats_cwd_beats_envfile(self, monkeypatch, tmp_path):
+        """Pin down: process env > cwd .env > --env-file."""
+        (tmp_path / ".env").write_text(
+            "BITBUCKET_TOKEN=cwd-token\nBITBUCKET_WEBHOOK_SECRET=cwd-secret\n"
+        )
+        env_file = tmp_path / "lowest.env"
+        env_file.write_text(
+            "BITBUCKET_TOKEN=envfile-token\nBITBUCKET_WEBHOOK_SECRET=envfile-secret\n"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        # --env-file alone loses to cwd .env.
+        monkeypatch.delenv("BITBUCKET_TOKEN", raising=False)
+        monkeypatch.delenv("BITBUCKET_WEBHOOK_SECRET", raising=False)
+        token, secret = resolve_secrets(env_file)
+        assert (token, secret) == ("cwd-token", "cwd-secret")
+
+        # Process env wins over both.
+        monkeypatch.setenv("BITBUCKET_TOKEN", "env-token")
+        monkeypatch.setenv("BITBUCKET_WEBHOOK_SECRET", "env-secret")
+        token, secret = resolve_secrets(env_file)
+        assert (token, secret) == ("env-token", "env-secret")
+
     def test_missing_secrets_exits(self, monkeypatch, tmp_path):
         monkeypatch.delenv("BITBUCKET_TOKEN", raising=False)
         monkeypatch.delenv("BITBUCKET_WEBHOOK_SECRET", raising=False)
