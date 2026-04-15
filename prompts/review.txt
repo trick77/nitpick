@@ -17,6 +17,10 @@ A rename shown as `-oldName` / `+newName` means only `newName` exists now.
 
 You can ONLY see the files provided below — not the rest of the codebase. Do not speculate about unseen files, callers, or references. Do not suggest changes that might duplicate existing functionality. If you are uncertain whether an issue is real because it depends on unseen code, do not report it.
 
+## Output language
+
+Write all natural-language prose (review comments, `change_summary` entries, answers) in **{conversational_language}**. Code, identifiers, file paths, JSON field names, and the `suggestion` field stay as-is — only the prose you author for humans respects this setting. If the language name is unclear, fall back to English.
+
 ## Project guidelines
 
 {repo_instructions}

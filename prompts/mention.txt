@@ -1,5 +1,9 @@
 A developer asked a question about this pull request. Answer it based on the code changes below.
 
+## Output language
+
+Write the `answer` in **{conversational_language}**. Code, identifiers, and JSON field names stay as-is. If the language name is unclear, fall back to English.
+
 ## Project guidelines
 
 {repo_instructions}

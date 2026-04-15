@@ -66,6 +66,42 @@ def test_diff_context_defaults():
     assert rc.diff_max_extra_lines_dynamic_context == 10
     assert rc.diff_allow_dynamic_context is True
     assert rc.ticket_compliance_check is True
+    assert rc.conversational_language == "English"
+
+
+def test_conversational_language_default_from_env(monkeypatch):
+    env = {
+        "BITBUCKET_URL": "https://bb.example.com",
+        "BITBUCKET_TOKEN": "tok",
+        "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "BITBUCKET_USERNAME": "bot",
+        "GITHUB_TOKEN": "ghp_tok",
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_TOKEN": "jira-tok",
+        "DATABASE_URL": "postgresql://u:p@localhost/db",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    config = load_config()
+    assert config.review.conversational_language == "English"
+
+
+def test_conversational_language_from_env(monkeypatch):
+    env = {
+        "BITBUCKET_URL": "https://bb.example.com",
+        "BITBUCKET_TOKEN": "tok",
+        "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "BITBUCKET_USERNAME": "bot",
+        "GITHUB_TOKEN": "ghp_tok",
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_TOKEN": "jira-tok",
+        "DATABASE_URL": "postgresql://u:p@localhost/db",
+        "CONVERSATIONAL_LANGUAGE": "German",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    config = load_config()
+    assert config.review.conversational_language == "German"
 
 
 def test_diff_context_from_env(monkeypatch):

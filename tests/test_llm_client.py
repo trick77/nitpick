@@ -694,6 +694,64 @@ class TestComplianceInstructions:
             await client.close()
 
 
+class TestConversationalLanguage:
+    @pytest.mark.asyncio
+    async def test_default_english_in_review_prompt(self, llm_config, review_config):
+        mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
+        client = LLMClient(llm_config, review_config)
+        client.openai_client.chat.completions.create = mock_create
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(files)
+            prompt = mock_create.call_args.kwargs["messages"][1]["content"]
+            assert "{conversational_language}" not in prompt
+            assert "**English**" in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_override_in_review_prompt(self, llm_config, review_config):
+        mock_create = AsyncMock(return_value=_mock_completion("[]", 100, 10))
+        client = LLMClient(llm_config, review_config)
+        client.openai_client.chat.completions.create = mock_create
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.review_diff(files, conversational_language="German")
+            prompt = mock_create.call_args.kwargs["messages"][1]["content"]
+            assert "{conversational_language}" not in prompt
+            assert "**German**" in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_default_english_in_mention_prompt(self, llm_config, review_config):
+        mock_create = AsyncMock(return_value=_mock_completion('{"answer": "hi"}', 100, 10))
+        client = LLMClient(llm_config, review_config)
+        client.openai_client.chat.completions.create = mock_create
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.answer_question("What?", files)
+            prompt = mock_create.call_args.kwargs["messages"][1]["content"]
+            assert "{conversational_language}" not in prompt
+            assert "**English**" in prompt
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_override_in_mention_prompt(self, llm_config, review_config):
+        mock_create = AsyncMock(return_value=_mock_completion('{"answer": "hi"}', 100, 10))
+        client = LLMClient(llm_config, review_config)
+        client.openai_client.chat.completions.create = mock_create
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            await client.answer_question("What?", files, conversational_language="German")
+            prompt = mock_create.call_args.kwargs["messages"][1]["content"]
+            assert "{conversational_language}" not in prompt
+            assert "**German**" in prompt
+        finally:
+            await client.close()
+
+
 class TestAnswerQuestion:
     @pytest.mark.asyncio
     async def test_answer_question_with_file_data(self, llm_config, review_config):

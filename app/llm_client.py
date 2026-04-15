@@ -498,11 +498,13 @@ class LLMClient:
         ticket_context: str = "",
         ticket_compliance_check: bool = True,
         cross_file_context: str = "",
+        conversational_language: str = "English",
     ) -> "LLMClient.ReviewResult":
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.prompt_template.replace("{tone}", tone_text)
         template = template.replace("{repo_instructions}", repo_instructions)
         template = template.replace("{ticket_context}", ticket_context or "No ticket context provided.")
+        template = template.replace("{conversational_language}", conversational_language)
 
         if ticket_compliance_check and ticket_context:
             template = template.replace("{compliance_instructions}", COMPLIANCE_INSTRUCTIONS)
@@ -600,12 +602,14 @@ class LLMClient:
     async def answer_question(
         self, question: str, files: list[FileReviewData], repo_instructions: str = "",
         tone: str = "default", ticket_context: str = "",
+        conversational_language: str = "English",
     ) -> str:
         tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
         template = self.mention_template.replace("{tone}", tone_text)
         template = template.replace("{question}", question)
         template = template.replace("{repo_instructions}", repo_instructions)
         template = template.replace("{ticket_context}", ticket_context or "No ticket context available.")
+        template = template.replace("{conversational_language}", conversational_language)
 
         groups, skipped_files = _group_files_by_token_budget(
             files,
