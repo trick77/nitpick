@@ -106,7 +106,6 @@ class Reviewer:
         self.max_comments = review_config.max_comments
         self.mention_trigger = bitbucket.bot_username
         self.ramsay_authors = review_config.ramsay_authors
-        self.conversational_language = review_config.conversational_language
 
     @staticmethod
     def _extract_ticket_id(pr: PullRequest) -> str | None:
@@ -385,7 +384,6 @@ class Reviewer:
                 ticket_context=ticket_context,
                 ticket_compliance_check=self.review_config.ticket_compliance_check,
                 cross_file_context=cross_file_ctx,
-                conversational_language=self.conversational_language,
             )
 
             # Deduplicate against existing findings in DB
@@ -618,7 +616,6 @@ class Reviewer:
             answer = await self.llm.answer_question(
                 question, files, repo_instructions, tone=tone,
                 ticket_context=ticket_context,
-                conversational_language=self.conversational_language,
             )
             await self.bitbucket.reply_to_comment(
                 project_key, repo_slug, pr.id, comment.id, answer,
