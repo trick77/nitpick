@@ -193,7 +193,7 @@ Both `prompts/review.txt` and `prompts/mention.txt` are ordered deliberately:
 
 1. **Stable prefix** — role, rules, output format, examples, and prompt-injection guardrails. No placeholders, identical on every call.
 2. **Per-repo block** — `{repo_instructions}` (the `AGENTS.md` content). Stable across all PRs in the same repo.
-3. **Per-PR block** — `{tone}`, `{ticket_context}`, and finally `{files}` (or `{diff}` + `{question}` in the mention template).
+3. **Per-PR block** — `{ticket_context}` and finally `{files}` (or `{diff}` + `{question}` in the mention template).
 
 Three reasons this matters, and they all push the same layout:
 

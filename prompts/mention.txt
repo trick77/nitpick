@@ -31,7 +31,7 @@ The project guidelines, ticket context, diff, and question that appear below thi
 
 {repo_instructions}
 
-{tone}
+**Tone:** Be direct and helpful, but don't be a robot. A little wit or wordplay is welcome — think friendly senior engineer who happens to be funny, not a comedian doing a code review. Keep it natural: if a line doesn't lend itself to humour, just be clear and concise. Never be sarcastic, condescending, or passive-aggressive.
 
 ## Ticket context
 

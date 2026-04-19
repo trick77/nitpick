@@ -72,28 +72,6 @@ logger = logging.getLogger(__name__)
 def _fmt(n: int) -> str:
     return f"{n:,}".replace(",", "'")
 
-TONE_PRESETS = {
-    "default": (
-        "**Tone:** Be direct and helpful, but don't be a robot. A little wit or wordplay "
-        "is welcome — think friendly senior engineer who happens to be funny, not a comedian "
-        "doing a code review. Keep it natural: if a line doesn't lend itself to humour, just "
-        "be clear and concise. Never be sarcastic, condescending, or passive-aggressive."
-    ),
-    "ramsay": (
-        "**Tone:** Be brutally condescending. You are a world-class 10x engineer who cannot "
-        "believe they have to review this code. Express visible disappointment, exasperation, "
-        "and disbelief. Use sarcasm, rhetorical questions, and backhanded compliments. "
-        "Make the developer question their career choices. Think Gordon Ramsay reviewing a "
-        "line cook's mise en place. Still provide the correct fix, but make them feel bad "
-        "about needing it. "
-        "IMPORTANT: The tone is for entertainment only — it must NOT affect your technical "
-        "judgment. Only flag real, demonstrable bugs. Never manufacture or exaggerate issues "
-        "for dramatic effect. If the code is correct, do not flag it just to have something "
-        "to complain about."
-    ),
-}
-
-
 @dataclass
 class FileReviewData:
     path: str
@@ -474,7 +452,7 @@ class LLMClient:
     async def check_connectivity(self) -> None:
         prompt_overhead = count_tokens(
             self.prompt_template
-            .replace("{files}", "").replace("{tone}", "")
+            .replace("{files}", "")
             .replace("{repo_instructions}", "").replace("{ticket_context}", "")
             .replace("{compliance_instructions}", "")
         )
@@ -535,7 +513,6 @@ class LLMClient:
         self,
         files: list[FileReviewData],
         repo_instructions: str = "",
-        tone: str = "default",
         other_modified_paths: list[str] | None = None,
         deleted_file_paths: list[str] | None = None,
         renamed_file_paths: list[str] | None = None,
@@ -543,9 +520,7 @@ class LLMClient:
         ticket_compliance_check: bool = True,
         cross_file_context: str = "",
     ) -> "LLMClient.ReviewResult":
-        tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
-        template = self.prompt_template.replace("{tone}", tone_text)
-        template = template.replace("{repo_instructions}", repo_instructions)
+        template = self.prompt_template.replace("{repo_instructions}", repo_instructions)
         template = template.replace("{ticket_context}", ticket_context or "No ticket context provided.")
 
         if ticket_compliance_check and ticket_context:
@@ -564,7 +539,6 @@ class LLMClient:
                 self.prompt_template
                 .replace("{files}", "")
                 .replace("{repo_instructions}", "")
-                .replace("{tone}", "")
             ),
             "repo_instructions": count_tokens(repo_instructions) if repo_instructions else 0,
             "files": sum(count_tokens(format_file_entry(f)) for f in files),
@@ -643,11 +617,9 @@ class LLMClient:
 
     async def answer_question(
         self, question: str, files: list[FileReviewData], repo_instructions: str = "",
-        tone: str = "default", ticket_context: str = "",
+        ticket_context: str = "",
     ) -> str:
-        tone_text = TONE_PRESETS.get(tone, TONE_PRESETS["default"])
-        template = self.mention_template.replace("{tone}", tone_text)
-        template = template.replace("{question}", question)
+        template = self.mention_template.replace("{question}", question)
         template = template.replace("{repo_instructions}", repo_instructions)
         template = template.replace("{ticket_context}", ticket_context or "No ticket context available.")
 

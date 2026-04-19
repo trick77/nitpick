@@ -235,7 +235,6 @@ The final prompt sent to the model is assembled from the template (`prompts/revi
 |---|---|
 | `{files}` | Rendered file entries (full content + diff) + supplementary context |
 | `{repo_instructions}` | Contents of `AGENTS.md` from the repo (if present) |
-| `{tone}` | Tone preset (default: friendly senior engineer; ramsay: brutally condescending) |
 | `{ticket_context}` | Jira ticket details (title, description, acceptance criteria) |
 | `{compliance_instructions}` | Instructions for evaluating ticket compliance (when Jira is enabled) |
 

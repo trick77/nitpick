@@ -21,7 +21,6 @@ def _make_config():
             auto_review_authors=["alice", "bob"],
             max_comments=10,
             review_prompt_template="prompts/review.txt",
-            ramsay_authors=["alice"],
         ),
         server=ServerConfig(host="0.0.0.0", port=9090),
         jira=JiraConfig(url="https://jira.example.com", token="secret-jira-token"),
