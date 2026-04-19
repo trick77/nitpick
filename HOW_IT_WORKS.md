@@ -38,7 +38,7 @@ Cross-file context analysis (symbol reference mapping)
 Token-aware chunking and compression
   |
   v
-AI review (GitHub Models API)
+AI review (OpenAI-compatible LLM API)
   |
   v
 Post-processing (dedup, sort, limit)
