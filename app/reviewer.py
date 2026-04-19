@@ -925,8 +925,6 @@ class Reviewer:
                 for f in top:
                     emoji = "❌" if f.severity == "critical" else "⚠️"
                     first_line = f.comment.splitlines()[0].strip() if f.comment else ""
-                    if len(first_line) > 120:
-                        first_line = first_line[:117].rstrip() + "…"
                     summary_lines.append(f"- {emoji} {first_line}")
                 if len(findings) > top_limit:
                     summary_lines.append(f"- …and {len(findings) - top_limit} more")
@@ -1075,7 +1073,7 @@ class Reviewer:
             cost.append(stats)
 
         if cost:
-            sections.append("### Cost\n" + "\n".join(f"- {m}" for m in cost))
+            sections.append("**Cost:**\n" + "\n".join(f"- {m}" for m in cost))
 
         return "\n\n".join(sections)
 
