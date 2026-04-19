@@ -248,7 +248,8 @@ def _make_review_result(findings=None, skipped_files=None, review_effort=1):
 def mock_llm():
     client = AsyncMock()
     client.config.model = "openai/gpt-4.1"
-    client.config.max_tokens_per_chunk = 80000
+    client.max_tokens_per_chunk = 80000
+    client.context_window = 1_000_000
     client.prompt_template = "Review these files:\n{files}\n{repo_instructions}"
     client.review_diff = AsyncMock(return_value=_make_review_result([
         ReviewFinding(file="file.py", line=1, severity="warning", comment="Test issue"),
@@ -391,7 +392,7 @@ class TestReviewer:
         )
         mock_bitbucket.fetch_file_content = AsyncMock(return_value=file_content)
         # Use a tiny max_tokens to force the large PR path
-        mock_llm.config.max_tokens_per_chunk = 1
+        mock_llm.max_tokens_per_chunk = 1
         mock_llm.prompt_template = "{files}\n{repo_instructions}"
         mock_llm.review_diff = AsyncMock(return_value=_make_review_result())
 
@@ -543,8 +544,8 @@ class TestSortAndLimit:
             token_usage=(7958, 6764),
             prompt_breakdown=breakdown,
         )
-        assert "~500 template" in summary
-        assert "~200 repo" in summary
+        assert "~500 review prompt" in summary
+        assert "~200 AGENTS.md" in summary
         assert "~7'258 file content" in summary
 
     def test_build_summary_prompt_breakdown_without_token_usage(self, reviewer):
@@ -569,6 +570,13 @@ class TestSortAndLimit:
         summary = reviewer._build_summary([])
         assert "Reviewed in" not in summary
         assert "chunk budget" not in summary
+
+    def test_build_summary_chunk_budget_with_context_window(self, reviewer):
+        summary = reviewer._build_summary(
+            [], chunk_count=1, chunk_budget=256_000, context_window=272_000,
+        )
+        assert "Reviewed in 1 pass" in summary
+        assert "256'000 of 272'000 context tokens" in summary
 
     @pytest.mark.asyncio
     async def test_findings_limited_in_review(self, mock_bitbucket, mock_llm):
@@ -702,7 +710,8 @@ class TestSortAndLimit:
 
     def test_build_summary_files_reviewed_all(self, reviewer):
         summary = reviewer._build_summary([], files_reviewed=5, total_files=5)
-        assert "Reviewed 5 files 📂" in summary
+        assert "Reviewed 5 files" in summary
+        assert "📂" not in summary
 
     def test_build_summary_files_reviewed_partial(self, reviewer):
         summary = reviewer._build_summary([], files_reviewed=8, total_files=12)
@@ -729,7 +738,7 @@ class TestSortAndLimit:
         assert "3 cross-file dependencies analyzed" in summary
         assert "`get_user`" in summary
         assert "`UserCache`" in summary
-        assert "🔗" in summary
+        assert "🔗" not in summary
 
     def test_build_summary_cross_file_symbols_truncated(self, reviewer):
         symbols = [f"func_{i}" for i in range(8)]
@@ -1471,7 +1480,8 @@ class TestIncrementalReview:
     def mock_llm(self):
         client = AsyncMock()
         client.config.model = "openai/gpt-4.1"
-        client.config.max_tokens_per_chunk = 80000
+        client.max_tokens_per_chunk = 80000
+        client.context_window = 1_000_000
         client.prompt_template = "Review these files:\n{files}\n{repo_instructions}"
         client.review_diff = AsyncMock(return_value=_make_review_result([
             ReviewFinding(file="new.py", line=1, severity="warning", comment="Test issue"),

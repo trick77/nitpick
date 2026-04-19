@@ -320,7 +320,7 @@ class Reviewer:
             renamed_paths: list[str] = []
 
             template = self.llm.prompt_template
-            max_tokens = self.llm.config.max_tokens_per_chunk
+            max_tokens = self.llm.max_tokens_per_chunk
 
             rc = self.review_config
             if is_small_pr(files, max_tokens, template, count_tokens, format_file_entry):
@@ -475,7 +475,8 @@ class Reviewer:
                 diff_removed=diff_removed,
                 cross_file_symbols=[r.symbol for r in cross_file_rels] if cross_file_rels else None,
                 chunk_count=llm_result.chunk_count,
-                chunk_budget=self.llm.config.max_tokens_per_chunk,
+                chunk_budget=self.llm.max_tokens_per_chunk,
+                context_window=self.llm.context_window,
             )
 
             await self._post_or_update_summary(
@@ -871,6 +872,7 @@ class Reviewer:
         cross_file_symbols: list[str] | None = None,
         chunk_count: int | None = None,
         chunk_budget: int | None = None,
+        context_window: int | None = None,
     ) -> str:
         if incremental_from and reviewed_commit:
             summary = "### Review summary (incremental update)\n"
@@ -955,7 +957,7 @@ class Reviewer:
                 diff_parts.append(f"-{diff_removed}")
             if diff_parts:
                 files_str += f", {' / '.join(diff_parts)} lines"
-            meta.append(f"{files_str} 📂")
+            meta.append(files_str)
         elif diff_added is not None or diff_removed is not None:
             parts = []
             if diff_added:
@@ -968,7 +970,7 @@ class Reviewer:
         if cross_file_symbols:
             symbol_list = ", ".join(f"`{s}`" for s in cross_file_symbols[:5])
             suffix = f" and {len(cross_file_symbols) - 5} more" if len(cross_file_symbols) > 5 else ""
-            meta.append(f"{len(cross_file_symbols)} cross-file dependencies analyzed ({symbol_list}{suffix}) 🔗")
+            meta.append(f"{len(cross_file_symbols)} cross-file dependencies analyzed ({symbol_list}{suffix})")
 
         if skipped_files:
             file_list = ", ".join(f"`{PurePosixPath(f).name}`" for f in skipped_files)
@@ -978,18 +980,23 @@ class Reviewer:
             meta.append(f"Reviewed without full file context (too large): {file_list} ⚠️")
 
         if chunk_count is not None:
-            budget_str = f"{_fmt(chunk_budget)} tokens" if chunk_budget else "unknown"
-            if chunk_count == 1:
-                meta.append(f"Reviewed in 1 pass (chunk budget: {budget_str}) 📦")
+            if chunk_budget and context_window:
+                budget_str = f"{_fmt(chunk_budget)} of {_fmt(context_window)} context tokens"
+            elif chunk_budget:
+                budget_str = f"{_fmt(chunk_budget)} tokens"
             else:
-                meta.append(f"Reviewed in {chunk_count} chunks (chunk budget: {budget_str}) 📦")
+                budget_str = "unknown"
+            if chunk_count == 1:
+                meta.append(f"Reviewed in 1 pass (chunk budget: {budget_str})")
+            else:
+                meta.append(f"Reviewed in {chunk_count} chunks (chunk budget: {budget_str})")
 
         if token_usage:
             if prompt_breakdown:
                 t = prompt_breakdown['template']
                 r = prompt_breakdown['repo_instructions']
                 f = prompt_breakdown['files']
-                meta.append(f"Input tokens: ~{_fmt(t)} template · ~{_fmt(r)} repo · ~{_fmt(f)} file content")
+                meta.append(f"Input tokens: ~{_fmt(t)} review prompt · ~{_fmt(r)} AGENTS.md · ~{_fmt(f)} file content")
             prompt_t, completion_t = token_usage
             model = self.llm.config.model
             total = prompt_t + completion_t
