@@ -12,9 +12,9 @@ from app.reviewer import Reviewer, _count_diff_lines, _sort_and_limit
 
 
 def _review_config(**overrides) -> ReviewConfig:
-    defaults = dict(auto_review_authors=["username"])
-    defaults.update(overrides)
-    return ReviewConfig(**defaults)
+    kwargs: dict = {"auto_review_authors": ["username"]}
+    kwargs.update(overrides)
+    return ReviewConfig(**kwargs)
 
 
 def _make_payload(
@@ -643,22 +643,13 @@ class TestSortAndLimit:
         mock_bitbucket.post_pr_comment.assert_called_once()
         mock_bitbucket.update_pr_comment.assert_not_called()
 
-    def test_build_summary_effort_score(self, reviewer):
+    def test_build_summary_effort_score_not_rendered(self, reviewer):
         findings = [
             ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
         ]
-        summary = reviewer._build_summary(findings, review_effort=3)
-        assert "📊" in summary
-        assert "**3/5**" in summary
-        assert "Medium" in summary
-
-    def test_build_summary_no_effort_score(self, reviewer):
-        summary = reviewer._build_summary([], review_effort=None)
+        summary = reviewer._build_summary(findings)
         assert "📊" not in summary
-
-    def test_build_summary_effort_omitted_when_no_findings(self, reviewer):
-        summary = reviewer._build_summary([], review_effort=5)
-        assert "📊" not in summary
+        assert "review effort" not in summary.lower()
 
     def test_build_summary_security_section(self, reviewer):
         findings = [
