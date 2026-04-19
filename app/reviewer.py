@@ -105,7 +105,6 @@ class Reviewer:
         self.auto_review_authors = review_config.auto_review_authors
         self.max_comments = review_config.max_comments
         self.mention_trigger = bitbucket.bot_username
-        self.ramsay_authors = review_config.ramsay_authors
 
     @staticmethod
     def _extract_ticket_id(pr: PullRequest) -> str | None:
@@ -156,9 +155,6 @@ class Reviewer:
         else:
             blocks.extend(self._format_ticket_block(ticket, "Jira ticket"))
         return "\n".join(blocks), ticket
-
-    def _tone_for_author(self, author: str) -> str:
-        return "ramsay" if author in self.ramsay_authors else "default"
 
     def is_auto_review_author(self, author_name: str) -> bool:
         return not self.auto_review_authors or author_name in self.auto_review_authors
@@ -394,9 +390,8 @@ class Reviewer:
                     )
                     logger.info("%s: linked Jira ticket %s", pr_tag, ticket_id)
 
-            tone = self._tone_for_author(author_name)
             llm_result = await self.llm.review_diff(
-                files, repo_instructions, tone=tone,
+                files, repo_instructions,
                 other_modified_paths=other_modified,
                 deleted_file_paths=deleted_paths,
                 renamed_file_paths=renamed_paths,
@@ -592,9 +587,8 @@ class Reviewer:
                         ticket_id, parent=parent_ticket,
                     )
 
-            tone = self._tone_for_author(pr.author.user.name)
             answer = await self.llm.answer_question(
-                question, files, repo_instructions, tone=tone,
+                question, files, repo_instructions,
                 ticket_context=ticket_context,
             )
             await self.bitbucket.reply_to_comment(

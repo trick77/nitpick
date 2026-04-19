@@ -45,12 +45,11 @@ class ReviewConfig(BaseModel):
     diff_max_extra_lines_dynamic_context: int = 10
     diff_allow_dynamic_context: bool = True
     review_prompt_template: str = "prompts/review.txt"
-    ramsay_authors: list[str] = []
     mention_prompt_template: str = "prompts/mention.txt"
     ticket_compliance_check: bool = True
     require_agents_md: bool = True
 
-    @field_validator("auto_review_authors", "ramsay_authors", mode="before")
+    @field_validator("auto_review_authors", mode="before")
     @classmethod
     def parse_comma_list(cls, v):
         if isinstance(v, str):
@@ -141,7 +140,6 @@ def load_config() -> AppConfig:
             diff_max_extra_lines_dynamic_context=int(_env("REVIEW_DIFF_MAX_EXTRA_LINES_DYNAMIC_CONTEXT", "10")),
             diff_allow_dynamic_context=_env("REVIEW_DIFF_ALLOW_DYNAMIC_CONTEXT", "true").lower() in ("true", "1", "yes"),
             review_prompt_template=_env("REVIEW_PROMPT_TEMPLATE", "prompts/review.txt"),
-            ramsay_authors=_env("REVIEW_RAMSAY_AUTHORS", ""),
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
             ticket_compliance_check=_env("REVIEW_TICKET_COMPLIANCE_CHECK", "true").lower() in ("true", "1", "yes"),
             require_agents_md=_env("REVIEW_REQUIRE_AGENTS_MD", "true").lower() in ("true", "1", "yes"),

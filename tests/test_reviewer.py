@@ -249,7 +249,7 @@ def mock_llm():
     client = AsyncMock()
     client.config.model = "openai/gpt-4.1"
     client.config.max_tokens_per_chunk = 80000
-    client.prompt_template = "Review these files:\n{files}\n{tone}\n{repo_instructions}"
+    client.prompt_template = "Review these files:\n{files}\n{repo_instructions}"
     client.review_diff = AsyncMock(return_value=_make_review_result([
         ReviewFinding(file="file.py", line=1, severity="warning", comment="Test issue"),
     ]))
@@ -392,7 +392,7 @@ class TestReviewer:
         mock_bitbucket.fetch_file_content = AsyncMock(return_value=file_content)
         # Use a tiny max_tokens to force the large PR path
         mock_llm.config.max_tokens_per_chunk = 1
-        mock_llm.prompt_template = "{files}\n{tone}\n{repo_instructions}"
+        mock_llm.prompt_template = "{files}\n{repo_instructions}"
         mock_llm.review_diff = AsyncMock(return_value=_make_review_result())
 
         rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
@@ -1466,7 +1466,7 @@ class TestIncrementalReview:
         client = AsyncMock()
         client.config.model = "openai/gpt-4.1"
         client.config.max_tokens_per_chunk = 80000
-        client.prompt_template = "Review these files:\n{files}\n{tone}\n{repo_instructions}"
+        client.prompt_template = "Review these files:\n{files}\n{repo_instructions}"
         client.review_diff = AsyncMock(return_value=_make_review_result([
             ReviewFinding(file="new.py", line=1, severity="warning", comment="Test issue"),
         ]))
