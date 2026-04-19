@@ -190,6 +190,8 @@ Edit `prompts/review.txt` to change the review focus, tone, or output format. Th
 
 Drop an `AGENTS.md` file in the repository root to provide project-specific review guidelines. noergler automatically picks it up from the PR source branch (falling back to the target branch) and injects the content into the review prompt. Use it to tell the reviewer about project conventions, forbidden patterns, or areas to focus on.
 
+By default, reviews are **gated** on the presence of `AGENTS.md` — without one, noergler skips the review and posts a short summary comment explaining why. To review PRs without an `AGENTS.md`, set `REVIEW_REQUIRE_AGENTS_MD=false`.
+
 ## Running tests
 
 ```bash

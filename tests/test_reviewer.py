@@ -320,9 +320,48 @@ class TestReviewer:
         assert "No issues found" in summary_text
 
     @pytest.mark.asyncio
+    async def test_review_skipped_when_agents_md_missing_and_required(self, mock_bitbucket, mock_llm):
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value="")
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        payload = _make_payload("username")
+        await rev.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_not_called()
+        mock_bitbucket.fetch_pr_diff.assert_not_called()
+        mock_bitbucket.post_inline_comment.assert_not_called()
+        mock_bitbucket.post_pr_comment.assert_called_once()
+        summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "AGENTS.md" in summary_text
+        assert "REVIEW_REQUIRE_AGENTS_MD" in summary_text
+
+    @pytest.mark.asyncio
+    async def test_review_proceeds_when_agents_md_missing_and_not_required(self, mock_bitbucket, mock_llm):
+        mock_bitbucket.fetch_file_content = AsyncMock(return_value="")
+        rev = Reviewer(
+            mock_bitbucket, mock_llm, _review_config(require_agents_md=False),
+            db_pool=AsyncMock(),
+        )
+        payload = _make_payload("username")
+        await rev.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_called_once()
+        mock_bitbucket.post_pr_comment.assert_called_once()
+        summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "Tip:" in summary_text
+
+    def test_build_agents_md_missing_summary_mentions_setting(self):
+        summary = Reviewer._build_agents_md_missing_summary()
+        assert "AGENTS.md" in summary
+        assert "REVIEW_REQUIRE_AGENTS_MD" in summary
+        assert NOERGLER_MARKER in summary
+
+    @pytest.mark.asyncio
     async def test_content_fetch_failure_falls_back_to_diff_only(self, mock_bitbucket, mock_llm):
         mock_bitbucket.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
-        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        rev = Reviewer(
+            mock_bitbucket, mock_llm, _review_config(require_agents_md=False),
+            db_pool=AsyncMock(),
+        )
         payload = _make_payload("username")
         await rev.review_pull_request(payload)
 
