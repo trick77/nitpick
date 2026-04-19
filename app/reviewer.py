@@ -32,13 +32,6 @@ def _fmt(n: int) -> str:
     return f"{n:,}".replace(",", "'")
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1}
-_EFFORT_LABELS = {
-    1: "Trivial: typo, comment, config tweak",
-    2: "Small: single-function change, clear intent",
-    3: "Medium: multiple files, some logic changes",
-    4: "Large: significant logic changes, needs careful review",
-    5: "Very large: architectural changes, complex interactions",
-}
 _REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
 _JIRA_TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d{1,7})\b')
 _SECURITY_KEYWORDS = re.compile(
@@ -278,6 +271,7 @@ class Reviewer:
 
             is_incremental = False
             incremental_from: str | None = None
+            diff: str = ""
 
             if payload.eventKey == "pr:from_ref_updated" and last_reviewed and source_commit:
                 try:
@@ -406,6 +400,7 @@ class Reviewer:
                 repository.get_existing_finding_keys(self.db_pool, project_key, repo_slug, pr_id),
                 fallback=set(),
             )
+            existing_keys = existing_keys or set()
             findings = [
                 f for f in llm_result.findings
                 if (f.file, f.line, f.severity) not in existing_keys
@@ -465,7 +460,6 @@ class Reviewer:
                 content_skipped_files=content_skipped,
                 token_usage=(llm_result.prompt_tokens, llm_result.completion_tokens),
                 prompt_breakdown=llm_result.prompt_breakdown,
-                review_effort=llm_result.review_effort,
                 ticket=ticket,
                 parent_ticket=parent_ticket,
                 compliance_requirements=llm_result.compliance_requirements,
@@ -810,7 +804,7 @@ class Reviewer:
                     existing_summary["id"], existing_summary["version"], summary,
                 )
 
-            if updated_version is not None:
+            if updated_version is not None and existing_summary:
                 summary_comment_id = existing_summary["id"]
                 summary_comment_version = updated_version
             else:
@@ -861,7 +855,6 @@ class Reviewer:
         content_skipped_files: list[str] | None = None,
         token_usage: tuple[int, int] | None = None,
         prompt_breakdown: dict[str, int] | None = None,
-        review_effort: int | None = None,
         ticket: JiraTicket | None = None,
         parent_ticket: JiraTicket | None = None,
         compliance_requirements: list[dict] | None = None,
@@ -937,26 +930,33 @@ class Reviewer:
                 ticket_lines.append("- Ticket compliance check is disabled ℹ️")
             ticket_section = "\n\n" + "\n".join(ticket_lines)
         meta = []
+        if agents_md_found:
+            meta.append("Using project-specific review guidelines from `AGENTS.md` ✅")
+        else:
+            meta.append("Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback. 💡")
         if not ticket:
             if jira_enabled:
                 meta.append("No ticket found in branch name or PR title ℹ️")
             else:
                 meta.append("Jira is not enabled ℹ️")
-        if review_effort is not None and findings:
-            label = _EFFORT_LABELS.get(review_effort, "")
-            meta.append(f"Estimated review effort: **{review_effort}/5** — {label} 📊")
-
         if files_reviewed is not None and total_files is not None:
             if files_reviewed == total_files:
-                meta.append(f"Reviewed {files_reviewed} files 📂")
+                files_str = f"Reviewed {files_reviewed} files"
             else:
                 skipped_count = total_files - files_reviewed
-                meta.append(
+                files_str = (
                     f"Reviewed {files_reviewed} of {total_files} files "
-                    f"({skipped_count} skipped: lock files, binaries, config) 📂"
+                    f"({skipped_count} skipped: lock files, binaries, config)"
                 )
-
-        if diff_added is not None or diff_removed is not None:
+            diff_parts = []
+            if diff_added:
+                diff_parts.append(f"+{diff_added}")
+            if diff_removed:
+                diff_parts.append(f"-{diff_removed}")
+            if diff_parts:
+                files_str += f", {' / '.join(diff_parts)} lines"
+            meta.append(f"{files_str} 📂")
+        elif diff_added is not None or diff_removed is not None:
             parts = []
             if diff_added:
                 parts.append(f"+{diff_added}")
@@ -977,12 +977,19 @@ class Reviewer:
             file_list = ", ".join(f"`{PurePosixPath(f).name}`" for f in content_skipped_files)
             meta.append(f"Reviewed without full file context (too large): {file_list} ⚠️")
 
-        if agents_md_found:
-            meta.append("Using project-specific review guidelines from `AGENTS.md` ✅")
-        else:
-            meta.append("Tip: Add an `AGENTS.md` to your repository root with project-specific review guidelines for more targeted feedback. 💡")
+        if chunk_count is not None:
+            budget_str = f"{_fmt(chunk_budget)} tokens" if chunk_budget else "unknown"
+            if chunk_count == 1:
+                meta.append(f"Reviewed in 1 pass (chunk budget: {budget_str}) 📦")
+            else:
+                meta.append(f"Reviewed in {chunk_count} chunks (chunk budget: {budget_str}) 📦")
 
         if token_usage:
+            if prompt_breakdown:
+                t = prompt_breakdown['template']
+                r = prompt_breakdown['repo_instructions']
+                f = prompt_breakdown['files']
+                meta.append(f"Input tokens: ~{_fmt(t)} template · ~{_fmt(r)} repo · ~{_fmt(f)} file content")
             prompt_t, completion_t = token_usage
             model = self.llm.config.model
             total = prompt_t + completion_t
@@ -990,18 +997,6 @@ class Reviewer:
             if elapsed is not None:
                 stats += f" · ⏱️ {elapsed:.1f}s"
             meta.append(stats)
-            if prompt_breakdown:
-                t = prompt_breakdown['template']
-                r = prompt_breakdown['repo_instructions']
-                f = prompt_breakdown['files']
-                meta.append(f"Tokens: ~{_fmt(t)} template · ~{_fmt(r)} repo · ~{_fmt(f)} file content")
-
-        if chunk_count is not None:
-            budget_str = f"{_fmt(chunk_budget)} tokens" if chunk_budget else "unknown"
-            if chunk_count == 1:
-                meta.append(f"Reviewed in 1 pass (chunk budget: {budget_str}) 📦")
-            else:
-                meta.append(f"Reviewed in {chunk_count} chunks (chunk budget: {budget_str}) 📦")
 
         if ticket_section:
             summary += ticket_section
