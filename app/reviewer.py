@@ -243,6 +243,30 @@ class Reviewer:
                 )
                 return
 
+            repo_instructions = await self._fetch_repo_instructions(
+                project_key, repo_slug, pr
+            )
+            if not repo_instructions and self.review_config.require_agents_md:
+                logger.info(
+                    "%s: no AGENTS.md found on PR or target branch, skipping review "
+                    "(set REVIEW_REQUIRE_AGENTS_MD=false to override)",
+                    pr_tag,
+                )
+                pr_review_id = await _safe_db(
+                    repository.upsert_pr_review(
+                        self.db_pool, project_key, repo_slug, pr_id,
+                        last_reviewed_commit=pr.fromRef.latestCommit,
+                        author=author_name,
+                        pr_title=pr.title,
+                    ),
+                    fallback=None,
+                )
+                await self._post_or_update_summary(
+                    project_key, repo_slug, pr_id, pr_review_id,
+                    self._build_agents_md_missing_summary(),
+                )
+                return
+
             logger.info(
                 "Starting review of %s by %s (branch: %s)",
                 pr_tag, author_name, pr.fromRef.displayId,
@@ -356,12 +380,7 @@ class Reviewer:
                     pr_tag, len(cross_file_rels),
                 )
 
-            repo_instructions = await self._fetch_repo_instructions(
-                project_key, repo_slug, pr
-            )
-            agents_md_found = bool(repo_instructions) or any(
-                f.path == "AGENTS.md" for f in files
-            )
+            agents_md_found = bool(repo_instructions)
 
             ticket_id = self._extract_ticket_id(pr)
             ticket_context = ""
@@ -468,48 +487,9 @@ class Reviewer:
                 cross_file_symbols=[r.symbol for r in cross_file_rels] if cross_file_rels else None,
             )
 
-            # Find existing summary comment from DB
-            existing_summary = None
-            if pr_review_id:
-                db_summary_info = await _safe_db(
-                    repository.get_summary_comment_info(self.db_pool, pr_review_id),
-                    fallback=None,
-                )
-                if db_summary_info:
-                    existing_summary = {
-                        "id": db_summary_info["summary_comment_id"],
-                        "version": db_summary_info["summary_comment_version"],
-                    }
-
-            summary_comment_id = None
-            summary_comment_version = None
-            try:
-                updated_version = None
-                if existing_summary:
-                    updated_version = await self.bitbucket.update_pr_comment(
-                        project_key, repo_slug, pr_id,
-                        existing_summary["id"], existing_summary["version"], summary,
-                    )
-
-                if updated_version is not None:
-                    summary_comment_id = existing_summary["id"]
-                    summary_comment_version = updated_version
-                else:
-                    post_result = await self.bitbucket.post_pr_comment(
-                        project_key, repo_slug, pr_id, summary
-                    )
-                    if post_result:
-                        summary_comment_id, summary_comment_version = post_result
-
-                if pr_review_id and summary_comment_id is not None:
-                    await _safe_db(
-                        repository.update_summary_comment(
-                            self.db_pool, pr_review_id,
-                            summary_comment_id, summary_comment_version or 0,
-                        )
-                    )
-            except Exception:
-                logger.error("Failed to post summary comment", exc_info=True)
+            await self._post_or_update_summary(
+                project_key, repo_slug, pr_id, pr_review_id, summary
+            )
 
             # Persist review statistics
             counts = {"critical": 0, "warning": 0}
@@ -783,6 +763,76 @@ class Reviewer:
         if ref.repository:
             return ref.repository.project.key, ref.repository.slug
         return ("", "")
+
+    @staticmethod
+    def _build_agents_md_missing_summary() -> str:
+        return (
+            f"{NOERGLER_MARKER}\n"
+            "### Review skipped — no `AGENTS.md` found 🛑\n\n"
+            "This repository has no `AGENTS.md` on the PR branch or the target branch. "
+            "Project-specific review guidelines are **vital** for producing targeted, "
+            "high-signal feedback — without them the reviewer falls back to generic nits, "
+            "so the review was not run.\n\n"
+            "**What to do**\n"
+            "- Add an `AGENTS.md` file to the repository root describing project "
+            "conventions, forbidden patterns, and areas the reviewer should focus on.\n"
+            "- Push the file to the PR branch (or merge it into the target branch) and "
+            "the next webhook event on this PR will trigger a full review.\n\n"
+            "**Opt-out**\n"
+            "- To review PRs without an `AGENTS.md`, set "
+            "`REVIEW_REQUIRE_AGENTS_MD=false` on the noergler service and restart.\n"
+        )
+
+    async def _post_or_update_summary(
+        self,
+        project_key: str,
+        repo_slug: str,
+        pr_id: int,
+        pr_review_id: int | None,
+        summary: str,
+    ) -> None:
+        """Post a new summary PR comment or update the existing one, tracking it in DB."""
+        existing_summary = None
+        if pr_review_id:
+            db_summary_info = await _safe_db(
+                repository.get_summary_comment_info(self.db_pool, pr_review_id),
+                fallback=None,
+            )
+            if db_summary_info:
+                existing_summary = {
+                    "id": db_summary_info["summary_comment_id"],
+                    "version": db_summary_info["summary_comment_version"],
+                }
+
+        summary_comment_id = None
+        summary_comment_version = None
+        try:
+            updated_version = None
+            if existing_summary:
+                updated_version = await self.bitbucket.update_pr_comment(
+                    project_key, repo_slug, pr_id,
+                    existing_summary["id"], existing_summary["version"], summary,
+                )
+
+            if updated_version is not None:
+                summary_comment_id = existing_summary["id"]
+                summary_comment_version = updated_version
+            else:
+                post_result = await self.bitbucket.post_pr_comment(
+                    project_key, repo_slug, pr_id, summary
+                )
+                if post_result:
+                    summary_comment_id, summary_comment_version = post_result
+
+            if pr_review_id and summary_comment_id is not None:
+                await _safe_db(
+                    repository.update_summary_comment(
+                        self.db_pool, pr_review_id,
+                        summary_comment_id, summary_comment_version or 0,
+                    )
+                )
+        except Exception:
+            logger.error("Failed to post summary comment", exc_info=True)
 
     async def _fetch_repo_instructions(
         self, project: str, repo: str, pr: PullRequest
