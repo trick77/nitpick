@@ -6,7 +6,7 @@
 
 AI-powered code review bridge for self-hosted Bitbucket Server. The name is German for "Nörgler" (grumbler/complainer).
 
-Brings automated AI code review to on-premise Bitbucket Server installations. Receives PR webhooks, sends diffs to the GitHub Models API, and posts findings back as inline comments plus a summary comment on the PR.
+Brings automated AI code review to on-premise Bitbucket Server installations. Receives PR webhooks, sends diffs to an OpenAI-compatible LLM API, and posts findings back as inline comments plus a summary comment on the PR.
 
 ![noergler inline review comment](review.png)
 
@@ -19,7 +19,7 @@ Brings automated AI code review to on-premise Bitbucket Server installations. Re
 - Smart context enrichment — fetches full file content, not just diffs, for better AI understanding
 - Asymmetric and dynamic diff context expansion with language-aware scope detection
 - Token-aware chunking and compression for large PRs
-- Prompt-cache-optimised template layout — stable rules and examples first, per-PR variables (tone, ticket, diff) last, so repeated reviews maximise GitHub Models cache reuse and the diff lands where model recall is strongest
+- Prompt-cache-optimised template layout — stable rules and examples first, per-PR variables (tone, ticket, diff) last, so repeated reviews maximise LLM prompt-cache reuse and the diff lands where model recall is strongest
 - Jira ticket compliance checking against acceptance criteria
 - Project-specific review guidelines via `AGENTS.md`
 - Comment deduplication against existing review comments
@@ -34,7 +34,7 @@ For a detailed description of the review pipeline, see [HOW_IT_WORKS.md](HOW_IT_
 1. **Webhook** — Bitbucket Server fires a `pr:opened` or `pr:from_ref_updated` event to the `/webhook` endpoint. The request is validated via HMAC-SHA256.
 2. **Diff fetch** — On new PRs, the full diff is fetched. On updates, noergler performs an incremental review covering only changes since the last review (falling back to full review after force-pushes).
 3. **Context enrichment** — Full file content is fetched for each reviewable file. Diff hunks are expanded with asymmetric context and language-aware scope detection. Cross-file analysis maps changed symbols to their references in other PR files.
-4. **AI review** — Files are grouped into token-aware chunks and sent to the GitHub Models API. The prompt includes file content, diffs, cross-file relationships, repo guidelines (`AGENTS.md`), and Jira ticket context.
+4. **AI review** — Files are grouped into token-aware chunks and sent to the configured LLM API (any OpenAI-compatible endpoint). The prompt includes file content, diffs, cross-file relationships, repo guidelines (`AGENTS.md`), and Jira ticket context.
 5. **Post results** — Findings are deduplicated against existing comments, sorted by severity, capped at the configured limit, and posted as inline comments. A summary comment tracks the reviewed commit for incremental reviews.
 
 ## Interacting with noergler
@@ -197,7 +197,7 @@ Both `prompts/review.txt` and `prompts/mention.txt` are ordered deliberately:
 
 Three reasons this matters, and they all push the same layout:
 
-- **Prompt cache reuse** — GitHub Models/OpenAI prompt caching matches on the longest stable prefix. Keeping all variable content at the tail means the entire stable portion is served from cache on every subsequent call.
+- **Prompt cache reuse** — OpenAI-compatible prompt caching matches on the longest stable prefix. Keeping all variable content at the tail means the entire stable portion is served from cache on every subsequent call.
 - **"Lost in the middle"** — long-context LLMs recall the start and end of a prompt better than the middle. Putting the diff (the thing the model must reason about) at the very end of the context gives it the strongest recall.
 - **KV-cache eviction on very long contexts** — some long-context implementations evict middle tokens first under pressure. Stable rules at the top are cheap to lose; the diff at the bottom stays intact.
 
@@ -241,7 +241,7 @@ GET /health → {"status": "ok"}
 app/
   main.py              # FastAPI app, /webhook and /health endpoints
   reviewer.py          # Review orchestrator (diff → AI → comments)
-  llm_client.py        # OpenAI SDK client for GitHub Models, token-aware chunking
+  llm_client.py        # OpenAI SDK client for the configured LLM API, token-aware chunking
   context_expansion.py # Asymmetric & dynamic diff context expansion
   cross_file_context.py # Cross-file symbol reference analysis
   diff_compression.py  # Large PR compression and file prioritization
