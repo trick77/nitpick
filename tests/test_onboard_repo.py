@@ -1,14 +1,17 @@
 import json
+import urllib.error
+import urllib.request
 from pathlib import Path
+from typing import Callable
+from urllib.parse import urlsplit
 
-import httpx
 import pytest
-import respx
 
-from app.bitbucket import BitbucketClient
-from app.config import REQUIRED_WEBHOOK_EVENTS, BitbucketConfig
 from scripts.onboard_repo import (
     DEFAULT_WEBHOOK_NAME,
+    REQUIRED_WEBHOOK_EVENTS,
+    BitbucketHTTP,
+    HTTPStatusError,
     RepoOnboarder,
     RepoSpec,
     load_onboarding_input,
@@ -20,20 +23,97 @@ BASE_URL = "https://bitbucket.company.com"
 WEBHOOK_URL = "https://noergler.internal/webhook"
 
 
-@pytest.fixture
-def bb_config():
-    return BitbucketConfig(
-        base_url=BASE_URL,
-        token="test-token",
-        webhook_secret="test-secret",
-        username="bot",
+# --------------------------------------------------------------------------- #
+# urlopen stub — dispatches by (method, path) → callable returning (status, body)
+# --------------------------------------------------------------------------- #
+
+class _FakeHTTPResponse:
+    def __init__(self, status: int, body: bytes):
+        self.status = status
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+RouteHandler = Callable[[dict, bytes | None], tuple[int, dict | str]]
+
+
+class FakeBitbucket:
+    """Route registry; install into urllib.request.urlopen for the duration of a test."""
+
+    def __init__(self):
+        self.routes: dict[tuple[str, str], RouteHandler] = {}
+        self.calls: list[dict] = []
+
+    def route(self, method: str, path: str, handler: RouteHandler) -> None:
+        self.routes[(method.upper(), path)] = handler
+
+    def respond_json(self, method: str, path: str, status: int, body: dict) -> None:
+        self.route(method, path, lambda q, b: (status, body))
+
+    def respond_text(self, method: str, path: str, status: int, text: str) -> None:
+        self.route(method, path, lambda q, b: (status, text))
+
+    def urlopen(self, req: urllib.request.Request, timeout: float | None = None):
+        parsed = urlsplit(req.full_url)
+        path = parsed.path
+        query_str = parsed.query
+        method = req.get_method().upper()
+        raw = req.data
+        body: bytes | None = bytes(raw) if raw is not None else None  # type: ignore[arg-type]
+        self.calls.append({
+            "method": method,
+            "path": path,
+            "query": query_str,
+            "url": req.full_url,
+            "body": body,
+            "headers": dict(req.headers),
+        })
+        handler = self.routes.get((method, path))
+        if handler is None:
+            raise AssertionError(f"No fake route for {method} {path}")
+        query = dict(
+            kv.split("=", 1) for kv in query_str.split("&")
+        ) if query_str else {}
+        status, payload = handler(query, body)
+        if isinstance(payload, (dict, list)):
+            body_bytes = json.dumps(payload).encode("utf-8")
+        else:
+            body_bytes = str(payload).encode("utf-8")
+        if status >= 400:
+            raise _make_httperror(req.full_url, status, body_bytes)
+        return _FakeHTTPResponse(status, body_bytes)
+
+
+def _make_httperror(url: str, status: int, body_bytes: bytes) -> urllib.error.HTTPError:
+    import io
+
+    return urllib.error.HTTPError(
+        url=url,
+        code=status,
+        msg=f"HTTP {status}",
+        hdrs=None,  # type: ignore[arg-type]
+        fp=io.BytesIO(body_bytes),
     )
 
 
 @pytest.fixture
-def client(bb_config):
-    c = BitbucketClient(bb_config)
-    yield c
+def fake(monkeypatch):
+    fb = FakeBitbucket()
+    monkeypatch.setattr("scripts.onboard_repo.urllib.request.urlopen", fb.urlopen)
+    return fb
+
+
+@pytest.fixture
+def client():
+    return BitbucketHTTP(base_url=BASE_URL, token="test-token")
 
 
 @pytest.fixture
@@ -222,153 +302,138 @@ class TestResolveSecrets:
 
 
 # --------------------------------------------------------------------------- #
+# Drift guard: inlined constant must match app/config.py
+# --------------------------------------------------------------------------- #
+
+def test_required_webhook_events_match_app_config():
+    from app.config import REQUIRED_WEBHOOK_EVENTS as canonical
+    assert REQUIRED_WEBHOOK_EVENTS == canonical
+
+
+# --------------------------------------------------------------------------- #
 # RepoOnboarder
 # --------------------------------------------------------------------------- #
 
 class TestVerifyPermissions:
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_ok(self, onboarder, spec, client):
-        respx.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo").mock(
-            return_value=httpx.Response(200, json={"slug": "my-repo"})
+    def test_ok(self, onboarder, spec, fake):
+        fake.respond_json("GET", "/rest/api/1.0/projects/PROJ/repos/my-repo", 200, {"slug": "my-repo"})
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/my-repo/pull-requests", 200, {"values": []}
         )
-        respx.get(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/pull-requests"
-        ).mock(return_value=httpx.Response(200, json={"values": []}))
-        await onboarder.verify_permissions(spec)
-        await client.close()
+        onboarder.verify_permissions(spec)
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_403_raises(self, onboarder, spec, client):
-        respx.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo").mock(
-            return_value=httpx.Response(403, text="Forbidden")
-        )
-        with pytest.raises(httpx.HTTPStatusError):
-            await onboarder.verify_permissions(spec)
-        await client.close()
+    def test_403_raises(self, onboarder, spec, fake):
+        fake.respond_text("GET", "/rest/api/1.0/projects/PROJ/repos/my-repo", 403, "Forbidden")
+        with pytest.raises(HTTPStatusError):
+            onboarder.verify_permissions(spec)
 
 
 class TestUpsertWebhook:
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_creates_when_absent(self, onboarder, spec, client):
-        respx.get(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
-        ).mock(return_value=httpx.Response(200, json={"values": [], "isLastPage": True}))
-        create = respx.post(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
-        ).mock(return_value=httpx.Response(200, json={"id": 42}))
+    def test_creates_when_absent(self, onboarder, spec, fake):
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks", 200,
+            {"values": [], "isLastPage": True},
+        )
+        fake.respond_json(
+            "POST", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks", 200, {"id": 42},
+        )
 
-        webhook_id, diff = await onboarder.upsert_webhook(spec)
+        webhook_id, diff = onboarder.upsert_webhook(spec)
 
         assert webhook_id == 42
         assert diff == ["create"]
-        body = json.loads(create.calls[0].request.content)
+        create_call = next(
+            c for c in fake.calls
+            if c["method"] == "POST" and c["path"].endswith("/webhooks")
+        )
+        body = json.loads(create_call["body"])
         assert body["name"] == DEFAULT_WEBHOOK_NAME
         assert body["url"] == WEBHOOK_URL
         assert set(body["events"]) == set(REQUIRED_WEBHOOK_EVENTS)
         assert body["configuration"]["secret"] == "whsec"
         assert body["active"] is True
         assert body["sslVerificationRequired"] is True
-        await client.close()
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_no_op_when_up_to_date(self, onboarder, spec, client):
-        respx.get(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
-        ).mock(return_value=httpx.Response(200, json={
-            "values": [{
-                "id": 7,
-                "name": DEFAULT_WEBHOOK_NAME,
-                "url": WEBHOOK_URL,
-                "events": list(REQUIRED_WEBHOOK_EVENTS),
-                "active": True,
-                "configuration": {"secret": "hidden"},
-            }],
-            "isLastPage": True,
-        }))
+    def test_no_op_when_up_to_date(self, onboarder, spec, fake):
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks", 200,
+            {
+                "values": [{
+                    "id": 7,
+                    "name": DEFAULT_WEBHOOK_NAME,
+                    "url": WEBHOOK_URL,
+                    "events": list(REQUIRED_WEBHOOK_EVENTS),
+                    "active": True,
+                    "configuration": {"secret": "hidden"},
+                }],
+                "isLastPage": True,
+            },
+        )
 
-        webhook_id, diff = await onboarder.upsert_webhook(spec)
+        webhook_id, diff = onboarder.upsert_webhook(spec)
         assert webhook_id == 7
         assert diff == []
-        await client.close()
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_updates_on_drift(self, onboarder, spec, client):
-        respx.get(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
-        ).mock(return_value=httpx.Response(200, json={
-            "values": [{
-                "id": 7,
-                "name": DEFAULT_WEBHOOK_NAME,
-                "url": "https://stale.example/webhook",
-                "events": ["pr:opened"],
-                "active": True,
-                "configuration": {"secret": "x"},
-            }],
-            "isLastPage": True,
-        }))
-        put = respx.put(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7"
-        ).mock(return_value=httpx.Response(200, json={"id": 7}))
+    def test_updates_on_drift(self, onboarder, spec, fake):
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks", 200,
+            {
+                "values": [{
+                    "id": 7,
+                    "name": DEFAULT_WEBHOOK_NAME,
+                    "url": "https://stale.example/webhook",
+                    "events": ["pr:opened"],
+                    "active": True,
+                    "configuration": {"secret": "x"},
+                }],
+                "isLastPage": True,
+            },
+        )
+        fake.respond_json(
+            "PUT", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7", 200, {"id": 7},
+        )
 
-        webhook_id, diff = await onboarder.upsert_webhook(spec)
+        webhook_id, diff = onboarder.upsert_webhook(spec)
         assert webhook_id == 7
         assert any("url" in d for d in diff)
         assert any("events" in d for d in diff)
-        assert put.called
-        await client.close()
+        assert any(c["method"] == "PUT" for c in fake.calls)
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_dry_run_skips_writes(self, client, spec):
+    def test_dry_run_skips_writes(self, client, spec, fake):
         p = RepoOnboarder(
             client, webhook_url=WEBHOOK_URL, webhook_secret="whsec", dry_run=True,
         )
-        respx.get(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
-        ).mock(return_value=httpx.Response(200, json={"values": [], "isLastPage": True}))
-        post_route = respx.post(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks"
-        ).mock(return_value=httpx.Response(200, json={"id": 1}))
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks", 200,
+            {"values": [], "isLastPage": True},
+        )
 
-        webhook_id, diff = await p.upsert_webhook(spec)
+        webhook_id, diff = p.upsert_webhook(spec)
         assert webhook_id == -1
         assert diff == ["create"]
-        assert not post_route.called
-        await client.close()
+        assert not any(c["method"] == "POST" for c in fake.calls)
 
 
 class TestTestWebhook:
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_success_returns_200(self, onboarder, spec, client):
-        respx.post(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test"
-        ).mock(return_value=httpx.Response(200, json={"statusCode": 200}))
-        assert await onboarder.test_webhook(spec, 7) == 200
-        await client.close()
+    def test_success_returns_200(self, onboarder, spec, fake):
+        fake.respond_json(
+            "POST", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test", 200,
+            {"statusCode": 200},
+        )
+        assert onboarder.test_webhook(spec, 7) == 200
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_downstream_401_reported(self, onboarder, spec, client):
-        respx.post(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test"
-        ).mock(return_value=httpx.Response(200, json={"statusCode": 401}))
-        assert await onboarder.test_webhook(spec, 7) == 401
-        await client.close()
+    def test_downstream_401_reported(self, onboarder, spec, fake):
+        fake.respond_json(
+            "POST", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test", 200,
+            {"statusCode": 401},
+        )
+        assert onboarder.test_webhook(spec, 7) == 401
 
-    @pytest.mark.asyncio
-    @respx.mock
-    async def test_bitbucket_side_failure(self, onboarder, spec, client):
-        respx.post(
-            f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test"
-        ).mock(return_value=httpx.Response(500, text="boom"))
-        assert await onboarder.test_webhook(spec, 7) == 500
-        await client.close()
+    def test_bitbucket_side_failure(self, onboarder, spec, fake):
+        fake.respond_text(
+            "POST", "/rest/api/1.0/projects/PROJ/repos/my-repo/webhooks/7/test", 500, "boom",
+        )
+        assert onboarder.test_webhook(spec, 7) == 500
 
 
 # --------------------------------------------------------------------------- #
@@ -376,7 +441,7 @@ class TestTestWebhook:
 # --------------------------------------------------------------------------- #
 
 class TestMain:
-    def test_multi_repo_mixed_results(self, tmp_path, monkeypatch):
+    def test_multi_repo_mixed_results(self, tmp_path, monkeypatch, fake):
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({
             "bitbucket_url": BASE_URL,
@@ -389,31 +454,27 @@ class TestMain:
         monkeypatch.setenv("BITBUCKET_WEBHOOK_SECRET", "s")
         monkeypatch.chdir(tmp_path)
 
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good").mock(
-                return_value=httpx.Response(200, json={})
-            )
-            mock.get(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good/pull-requests"
-            ).mock(return_value=httpx.Response(200, json={"values": []}))
-            mock.get(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good/webhooks"
-            ).mock(return_value=httpx.Response(200, json={"values": [], "isLastPage": True}))
-            mock.post(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good/webhooks"
-            ).mock(return_value=httpx.Response(200, json={"id": 1}))
-            mock.post(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/good/webhooks/1/test"
-            ).mock(return_value=httpx.Response(200, json={"statusCode": 200}))
-            mock.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/bad").mock(
-                return_value=httpx.Response(404, text="no repo")
-            )
+        fake.respond_json("GET", "/rest/api/1.0/projects/PROJ/repos/good", 200, {})
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/good/pull-requests", 200, {"values": []},
+        )
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/good/webhooks", 200,
+            {"values": [], "isLastPage": True},
+        )
+        fake.respond_json(
+            "POST", "/rest/api/1.0/projects/PROJ/repos/good/webhooks", 200, {"id": 1},
+        )
+        fake.respond_json(
+            "POST", "/rest/api/1.0/projects/PROJ/repos/good/webhooks/1/test", 200,
+            {"statusCode": 200},
+        )
+        fake.respond_text("GET", "/rest/api/1.0/projects/PROJ/repos/bad", 404, "no repo")
 
-            rc = main([str(cfg)])
-
+        rc = main([str(cfg)])
         assert rc == 1
 
-    def test_dry_run_issues_no_writes(self, tmp_path, monkeypatch, capsys):
+    def test_dry_run_issues_no_writes(self, tmp_path, monkeypatch, capsys, fake):
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({
             "bitbucket_url": BASE_URL,
@@ -424,28 +485,18 @@ class TestMain:
         monkeypatch.setenv("BITBUCKET_WEBHOOK_SECRET", "s")
         monkeypatch.chdir(tmp_path)
 
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/r").mock(
-                return_value=httpx.Response(200, json={})
-            )
-            mock.get(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/r/pull-requests"
-            ).mock(return_value=httpx.Response(200, json={"values": []}))
-            mock.get(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/r/webhooks"
-            ).mock(return_value=httpx.Response(200, json={"values": [], "isLastPage": True}))
-            create_route = mock.post(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/r/webhooks"
-            ).mock(return_value=httpx.Response(200, json={"id": 1}))
-            test_route = mock.post(
-                f"{BASE_URL}/rest/api/1.0/projects/PROJ/repos/r/webhooks/1/test"
-            ).mock(return_value=httpx.Response(200, json={"statusCode": 200}))
+        fake.respond_json("GET", "/rest/api/1.0/projects/PROJ/repos/r", 200, {})
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/r/pull-requests", 200, {"values": []},
+        )
+        fake.respond_json(
+            "GET", "/rest/api/1.0/projects/PROJ/repos/r/webhooks", 200,
+            {"values": [], "isLastPage": True},
+        )
 
-            rc = main([str(cfg), "--dry-run"])
-
+        rc = main([str(cfg), "--dry-run"])
         assert rc == 0
-        assert not create_route.called
-        assert not test_route.called
+        assert not any(c["method"] == "POST" for c in fake.calls)
         out = capsys.readouterr().out
         assert "PROJ/r" in out
         assert "ok" in out

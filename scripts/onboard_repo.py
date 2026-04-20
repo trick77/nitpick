@@ -2,7 +2,7 @@
 Onboard a Bitbucket Server repository to noergler webhook delivery.
 
 Usage:
-    python -m scripts.onboard_repo config.json [--name noergler] [--dry-run] [--env-file PATH]
+    python scripts/onboard_repo.py config.json [--name noergler] [--dry-run] [--env-file PATH]
 
 The JSON config describes target repos and URLs. Secrets (BITBUCKET_TOKEN,
 BITBUCKET_WEBHOOK_SECRET) are resolved from, in order:
@@ -13,28 +13,38 @@ BITBUCKET_WEBHOOK_SECRET) are resolved from, in order:
 BITBUCKET_WEBHOOK_SECRET used by this script MUST match the value the running
 noergler service has configured — Bitbucket and noergler share the HMAC secret;
 this script only programs Bitbucket's side.
+
+This script is intentionally stdlib-only so it can run on any host with Python
+3.10+ without a venv or `pip install`.
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 import os
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
-
-from app.bitbucket import BitbucketClient
-from app.config import REQUIRED_WEBHOOK_EVENTS, BitbucketConfig
-
 logger = logging.getLogger("onboard_repo")
 
 DEFAULT_WEBHOOK_NAME = "noergler"
+
+# Must match REQUIRED_WEBHOOK_EVENTS in app/config.py. Inlined here to keep this
+# script stdlib-only (no import of app.config, which pulls in pydantic).
+REQUIRED_WEBHOOK_EVENTS: tuple[str, ...] = (
+    "pr:opened",
+    "pr:from_ref_updated",
+    "pr:comment:added",
+    "pr:merged",
+    "pr:deleted",
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -83,8 +93,6 @@ def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
     Precedence (first match wins): process env > cwd .env > --env-file.
     Raises SystemExit on missing.
     """
-    # Build the map in reverse-precedence order so later updates (= higher
-    # priority) overwrite earlier ones.
     merged: dict[str, str] = {}
     if env_file is not None:
         merged.update(_load_env_file(env_file))
@@ -92,7 +100,6 @@ def resolve_secrets(env_file: Path | None) -> tuple[str, str]:
     for k in ("BITBUCKET_TOKEN", "BITBUCKET_WEBHOOK_SECRET", "BITBUCKET_USERNAME"):
         if k in os.environ and os.environ[k]:
             merged[k] = os.environ[k]
-    # Stash the resolved env for later use (e.g. BITBUCKET_USERNAME lookup).
     resolve_secrets._resolved = merged  # type: ignore[attr-defined]
 
     missing = [k for k in ("BITBUCKET_TOKEN", "BITBUCKET_WEBHOOK_SECRET") if not merged.get(k)]
@@ -179,6 +186,132 @@ def _require_url(value: Any, field_name: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Minimal stdlib HTTP client for Bitbucket Server
+# --------------------------------------------------------------------------- #
+
+class HTTPStatusError(Exception):
+    def __init__(self, status_code: int, text: str, url: str):
+        super().__init__(f"HTTP {status_code} for {url}: {text[:200]}")
+        self.status_code = status_code
+        self.text = text
+        self.url = url
+
+
+@dataclass
+class _Response:
+    status_code: int
+    text: str
+
+    def json(self) -> Any:
+        return json.loads(self.text) if self.text else {}
+
+
+class BitbucketHTTP:
+    """Stdlib-only synchronous Bitbucket Server REST client.
+
+    Only implements the endpoints the onboarder needs.
+    """
+
+    def __init__(self, base_url: str, token: str, timeout: float = 30.0):
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.timeout = timeout
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: Any | None = None,
+        tolerate_errors: bool = False,
+    ) -> _Response:
+        url = self.base_url + path
+        if params:
+            url = url + "?" + urllib.parse.urlencode(params)
+
+        data: bytes | None = None
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json",
+        }
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+                return _Response(status_code=resp.status, text=text)
+        except urllib.error.HTTPError as exc:
+            text = ""
+            try:
+                text = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                pass
+            if tolerate_errors:
+                return _Response(status_code=exc.code, text=text)
+            raise HTTPStatusError(exc.code, text, url) from exc
+
+    def get_repo(self, project: str, repo: str) -> dict:
+        resp = self._request("GET", f"/rest/api/1.0/projects/{project}/repos/{repo}")
+        return resp.json()
+
+    def list_pull_requests(self, project: str, repo: str, limit: int = 1) -> dict:
+        resp = self._request(
+            "GET",
+            f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests",
+            params={"limit": limit},
+        )
+        return resp.json()
+
+    def list_webhooks(self, project: str, repo: str) -> list[dict]:
+        """Return all webhooks (handles pagination)."""
+        values: list[dict] = []
+        start = 0
+        while True:
+            resp = self._request(
+                "GET",
+                f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks",
+                params={"start": start, "limit": 100},
+            )
+            page = resp.json()
+            values.extend(page.get("values") or [])
+            if page.get("isLastPage", True):
+                break
+            next_start = page.get("nextPageStart")
+            if not isinstance(next_start, int) or next_start <= start:
+                break
+            start = next_start
+        return values
+
+    def create_webhook(self, project: str, repo: str, body: dict) -> dict:
+        resp = self._request(
+            "POST",
+            f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks",
+            body=body,
+        )
+        return resp.json()
+
+    def update_webhook(self, project: str, repo: str, webhook_id: int, body: dict) -> dict:
+        resp = self._request(
+            "PUT",
+            f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks/{webhook_id}",
+            body=body,
+        )
+        return resp.json()
+
+    def test_webhook(self, project: str, repo: str, webhook_id: int) -> _Response:
+        return self._request(
+            "POST",
+            f"/rest/api/1.0/projects/{project}/repos/{repo}/webhooks/{webhook_id}/test",
+            body={},
+            tolerate_errors=True,
+        )
+
+
+# --------------------------------------------------------------------------- #
 # Onboarder
 # --------------------------------------------------------------------------- #
 
@@ -194,7 +327,7 @@ class RepoResult:
 class RepoOnboarder:
     def __init__(
         self,
-        client: BitbucketClient,
+        client: BitbucketHTTP,
         webhook_url: str,
         webhook_secret: str,
         webhook_name: str = DEFAULT_WEBHOOK_NAME,
@@ -207,10 +340,10 @@ class RepoOnboarder:
         self.dry_run = dry_run
 
     # -- Step 1 -- #
-    async def verify_permissions(self, spec: RepoSpec) -> None:
-        """Confirm read access to repo and its PRs. Raises httpx.HTTPStatusError on failure."""
-        await self.client.get_repo(spec.project, spec.repo)
-        await self.client.list_pull_requests(spec.project, spec.repo, limit=1)
+    def verify_permissions(self, spec: RepoSpec) -> None:
+        """Confirm read access to repo and its PRs. Raises HTTPStatusError on failure."""
+        self.client.get_repo(spec.project, spec.repo)
+        self.client.list_pull_requests(spec.project, spec.repo, limit=1)
         logger.info("[%s] read permissions OK", spec.key)
 
     # -- Step 2 -- #
@@ -236,16 +369,14 @@ class RepoOnboarder:
             diffs.append(f"events: missing={missing} extra={extra}")
         if not existing.get("active", True):
             diffs.append("active: False -> True")
-        # Secret is not returned by the API; assume it must be re-applied when other
-        # changes exist, but never just for the secret (can't detect drift).
         existing_cfg = existing.get("configuration") or {}
         if not existing_cfg:
             diffs.append("configuration.secret: (unset) -> (set)")
         return diffs
 
-    async def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
+    def upsert_webhook(self, spec: RepoSpec) -> tuple[int, list[str]]:
         """Create or update the webhook. Returns (webhook_id, diff)."""
-        hooks = await self.client.list_webhooks(spec.project, spec.repo)
+        hooks = self.client.list_webhooks(spec.project, spec.repo)
         existing = next((h for h in hooks if h.get("name") == self.webhook_name), None)
         body = self._build_webhook_body()
 
@@ -254,7 +385,7 @@ class RepoOnboarder:
             if self.dry_run:
                 logger.info("[%s] DRY-RUN body=%s", spec.key, _redact(body))
                 return -1, ["create"]
-            created = await self.client.create_webhook(spec.project, spec.repo, body)
+            created = self.client.create_webhook(spec.project, spec.repo, body)
             return int(created["id"]), ["create"]
 
         diff = self._diff_webhook(existing)
@@ -266,15 +397,13 @@ class RepoOnboarder:
         if self.dry_run:
             logger.info("[%s] DRY-RUN body=%s", spec.key, _redact(body))
             return int(existing["id"]), diff
-        await self.client.update_webhook(spec.project, spec.repo, int(existing["id"]), body)
+        self.client.update_webhook(spec.project, spec.repo, int(existing["id"]), body)
         return int(existing["id"]), diff
 
     # -- Step 3 -- #
-    async def test_webhook(self, spec: RepoSpec, webhook_id: int) -> int:
+    def test_webhook(self, spec: RepoSpec, webhook_id: int) -> int:
         """Trigger Bitbucket's test-webhook endpoint. Returns the observed downstream status."""
-        response = await self.client.test_webhook(spec.project, spec.repo, webhook_id)
-        # Bitbucket returns 200 with a body describing the downstream attempt, or a 4xx if the
-        # test couldn't be issued at all. Surface the raw status — callers decide what's OK.
+        response = self.client.test_webhook(spec.project, spec.repo, webhook_id)
         if response.status_code >= 400:
             logger.error(
                 "[%s] test-webhook failed: HTTP %d — %s",
@@ -290,34 +419,33 @@ class RepoOnboarder:
         return int(downstream) if isinstance(downstream, int) else response.status_code
 
     # -- Orchestrator -- #
-    async def onboard(self, spec: RepoSpec) -> RepoResult:
+    def onboard(self, spec: RepoSpec) -> RepoResult:
         try:
-            await self.verify_permissions(spec)
-        except httpx.HTTPStatusError as exc:
+            self.verify_permissions(spec)
+        except HTTPStatusError as exc:
             return RepoResult(
                 spec, "failed",
-                detail=f"permission check HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+                detail=f"permission check HTTP {exc.status_code}: {exc.text[:200]}",
             )
-        except httpx.HTTPError as exc:
+        except urllib.error.URLError as exc:
             return RepoResult(spec, "failed", detail=f"permission check: {exc}")
 
         try:
-            webhook_id, diff = await self.upsert_webhook(spec)
-        except httpx.HTTPStatusError as exc:
+            webhook_id, diff = self.upsert_webhook(spec)
+        except HTTPStatusError as exc:
             return RepoResult(
                 spec, "failed",
-                detail=f"upsert webhook HTTP {exc.response.status_code}: {exc.response.text[:200]}",
+                detail=f"upsert webhook HTTP {exc.status_code}: {exc.text[:200]}",
             )
-        except httpx.HTTPError as exc:
+        except urllib.error.URLError as exc:
             return RepoResult(spec, "failed", detail=f"upsert webhook: {exc}")
 
         if self.dry_run:
             return RepoResult(spec, "ok", detail="dry-run", diff=diff)
 
         try:
-            status = await self.test_webhook(spec, webhook_id)
-        except httpx.HTTPError as exc:
-            # Webhook was created/updated, but connectivity test failed. Surface both.
+            status = self.test_webhook(spec, webhook_id)
+        except urllib.error.URLError as exc:
             return RepoResult(
                 spec, "failed",
                 detail=f"webhook upserted; test failed: {exc}",
@@ -348,7 +476,7 @@ def _redact(body: dict) -> dict:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="python -m scripts.onboard_repo",
+        prog="python scripts/onboard_repo.py",
         description="Onboard Bitbucket Server repos to noergler by creating/updating their webhooks (idempotent).",
         epilog=(
             "Write permission check is implicit: if the token lacks repo-write, the webhook "
@@ -374,7 +502,7 @@ def _print_summary(results: list[RepoResult]) -> None:
         print(f"{r.repo.key.ljust(width_repo)}  {r.status.ljust(7)}  {r.detail}")
 
 
-async def _run(args: argparse.Namespace) -> int:
+def _run(args: argparse.Namespace) -> int:
     token, webhook_secret = resolve_secrets(args.env_file)
     inp = load_onboarding_input(args.config)
 
@@ -386,14 +514,7 @@ async def _run(args: argparse.Namespace) -> int:
     if args.dry_run:
         logger.info("DRY-RUN: no writes will be issued")
 
-    bb_config = BitbucketConfig(
-        base_url=inp.bitbucket_url,
-        token=token,
-        webhook_secret=webhook_secret,
-        username=getattr(resolve_secrets, "_resolved", {}).get("BITBUCKET_USERNAME")
-        or os.environ.get("BITBUCKET_USERNAME", "noergler-onboard"),
-    )
-    client = BitbucketClient(bb_config)
+    client = BitbucketHTTP(base_url=inp.bitbucket_url, token=token)
     onboarder = RepoOnboarder(
         client,
         webhook_url=inp.webhook_url,
@@ -403,17 +524,14 @@ async def _run(args: argparse.Namespace) -> int:
     )
 
     results: list[RepoResult] = []
-    try:
-        for spec in inp.repos:
-            logger.info("--- %s ---", spec.key)
-            try:
-                result = await onboarder.onboard(spec)
-            except Exception as exc:  # noqa: BLE001 — per-repo isolation
-                logger.exception("[%s] unexpected error", spec.key)
-                result = RepoResult(spec, "failed", detail=f"unexpected: {exc}")
-            results.append(result)
-    finally:
-        await client.close()
+    for spec in inp.repos:
+        logger.info("--- %s ---", spec.key)
+        try:
+            result = onboarder.onboard(spec)
+        except Exception as exc:  # noqa: BLE001 — per-repo isolation
+            logger.exception("[%s] unexpected error", spec.key)
+            result = RepoResult(spec, "failed", detail=f"unexpected: {exc}")
+        results.append(result)
 
     _print_summary(results)
     failed = [r for r in results if r.status == "failed"]
@@ -426,8 +544,7 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    return asyncio.run(_run(args))
+    return _run(args)
 
 
 if __name__ == "__main__":
