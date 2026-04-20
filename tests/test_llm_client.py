@@ -12,6 +12,7 @@ from app.llm_client import (
     format_file_entry,
     _context_window_for,
     _group_files_by_token_budget,
+    _merge_change_summaries,
     _parse_mention_response,
     _parse_review_response,
     _render_file_group,
@@ -198,6 +199,27 @@ class TestParseReviewResponse:
         })
         _, _, change_summary = _parse_review_response(content)
         assert change_summary == []
+
+
+class TestMergeChangeSummaries:
+    def test_concatenates_in_order(self):
+        merged = _merge_change_summaries([["A", "B"], ["C"]])
+        assert merged == ["A", "B", "C"]
+
+    def test_dedupes_case_insensitive(self):
+        merged = _merge_change_summaries([["Adds retry"], ["adds retry", "New thing"]])
+        assert merged == ["Adds retry", "New thing"]
+
+    def test_filters_non_strings_and_empty(self):
+        merged = _merge_change_summaries([["A", "", "  "], [None, 42, "B"]])  # type: ignore[list-item]
+        assert merged == ["A", "B"]
+
+    def test_caps_at_ten_bullets(self):
+        parts = [[f"item {i}" for i in range(20)]]
+        merged = _merge_change_summaries(parts)
+        assert len(merged) == 10
+        assert merged[0] == "item 0"
+        assert merged[-1] == "item 9"
 
 
 class TestParseMentionResponse:

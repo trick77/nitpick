@@ -233,6 +233,27 @@ def _group_files_by_token_budget(
     return groups, skipped
 
 
+_CHANGE_SUMMARY_MAX_BULLETS = 10
+
+
+def _merge_change_summaries(parts: list[list[str]]) -> list[str]:
+    """Concatenate chunk summaries in order, de-dup case-insensitively, cap length."""
+    seen: set[str] = set()
+    merged: list[str] = []
+    for part in parts:
+        for item in part:
+            if not isinstance(item, str):
+                continue
+            key = item.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            if len(merged) >= _CHANGE_SUMMARY_MAX_BULLETS:
+                return merged
+    return merged
+
+
 def _parse_review_response(content: str) -> tuple[list[ReviewFinding], list[dict], list[str]]:
     content = content.strip()
     if content.startswith("```"):
@@ -558,7 +579,7 @@ class LLMClient:
         total_prompt_tokens = 0
         total_completion_tokens = 0
         compliance_requirements: list[dict] = []
-        change_summary: list[str] = []
+        chunk_summaries: list[list[str]] = []
         for i, group in enumerate(groups):
             logger.info("Reviewing chunk %d/%d (%d file%s)",
                         i + 1, len(groups), len(group),
@@ -572,8 +593,10 @@ class LLMClient:
             total_completion_tokens += completion_tokens
             if chunk_requirements and not compliance_requirements:
                 compliance_requirements = chunk_requirements
-            if chunk_summary and not change_summary:
-                change_summary = chunk_summary
+            if chunk_summary:
+                chunk_summaries.append(chunk_summary)
+
+        change_summary = _merge_change_summaries(chunk_summaries)
 
         total = total_prompt_tokens + total_completion_tokens
         logger.info(
@@ -802,7 +825,7 @@ class LLMClient:
             left = await self._review_file_group(group[:mid], template, depth + 1, max_depth)
             right = await self._review_file_group(group[mid:], template, depth + 1, max_depth)
             compliance = left[4] if left[4] else right[4]
-            change_summary = left[5] if left[5] else right[5]
+            change_summary = _merge_change_summaries([left[5], right[5]])
             return (
                 left[0] + right[0],
                 left[1] + right[1],
