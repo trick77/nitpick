@@ -732,13 +732,33 @@ class TestSortAndLimit:
         summary = reviewer._build_summary(
             [], change_summary=["Added retry logic", "Replaced sync with async I/O"]
         )
-        assert "### What changed" in summary
+        assert "**What changed:**" in summary
         assert "- Added retry logic" in summary
         assert "- Replaced sync with async I/O" in summary
 
     def test_build_summary_without_change_summary(self, reviewer):
         summary = reviewer._build_summary([])
-        assert "### What changed" not in summary
+        assert "What changed" not in summary
+
+    def test_build_summary_what_changed_above_top_findings(self, reviewer):
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="critical", comment="bug A"),
+            ReviewFinding(file="b.py", line=2, severity="warning", comment="issue B"),
+        ]
+        summary = reviewer._build_summary(
+            findings, change_summary=["Added retry logic"]
+        )
+        what_idx = summary.index("**What changed:**")
+        top_idx = summary.index("**Top findings:**")
+        assert what_idx < top_idx
+
+    def test_build_summary_what_changed_when_no_findings(self, reviewer):
+        summary = reviewer._build_summary(
+            [], change_summary=["Refactors X without behavior change"]
+        )
+        assert "No issues found" in summary
+        assert "**What changed:**" in summary
+        assert "- Refactors X without behavior change" in summary
 
     def test_build_summary_no_divider_before_meta(self, reviewer):
         findings = [

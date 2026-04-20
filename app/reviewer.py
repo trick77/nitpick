@@ -889,6 +889,11 @@ class Reviewer:
 
         if not findings:
             summary_lines.append("- No issues found ✅")
+            if change_summary:
+                summary_lines.append("")
+                summary_lines.append("**What changed:**")
+                for item in change_summary:
+                    summary_lines.append(f"- {item}")
         else:
             counts = {"critical": 0, "warning": 0}
             for f in findings:
@@ -915,6 +920,12 @@ class Reviewer:
                     f"- Showing top {len(findings)} findings by severity. "
                     "Additional findings were omitted."
                 )
+
+            if change_summary:
+                summary_lines.append("")
+                summary_lines.append("**What changed:**")
+                for item in change_summary:
+                    summary_lines.append(f"- {item}")
 
             # Top-N one-liners (sorted by severity; `findings` is already sorted).
             top_limit = 5
@@ -968,11 +979,6 @@ class Reviewer:
                     mark = "✅" if r.get("met") else "❌"
                     ticket_lines.append(f"- {r.get('requirement', '???')} {mark}")
             sections.append("\n".join(ticket_lines))
-
-        # --- What changed
-        if change_summary:
-            change_lines = ["### What changed"] + [f"- {item}" for item in change_summary]
-            sections.append("\n".join(change_lines))
 
         # --- Scope
         scope: list[str] = []
