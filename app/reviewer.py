@@ -238,6 +238,28 @@ class Reviewer:
                 )
                 return
 
+            opt_out_keyword = self.review_config.opt_out_branch_keyword
+            branch_name = pr.fromRef.displayId
+            if opt_out_keyword and opt_out_keyword.lower() in branch_name.lower():
+                logger.info(
+                    "%s: branch %r contains opt-out keyword %r, skipping review",
+                    pr_tag, branch_name, opt_out_keyword,
+                )
+                pr_review_id = await _safe_db(
+                    repository.upsert_pr_review(
+                        self.db_pool, project_key, repo_slug, pr_id,
+                        last_reviewed_commit=pr.fromRef.latestCommit,
+                        author=author_name,
+                        pr_title=pr.title,
+                    ),
+                    fallback=None,
+                )
+                await self._post_or_update_summary(
+                    project_key, repo_slug, pr_id, pr_review_id,
+                    self._build_opt_out_branch_summary(opt_out_keyword, branch_name),
+                )
+                return
+
             repo_instructions = await self._fetch_repo_instructions(
                 project_key, repo_slug, pr
             )
@@ -760,6 +782,24 @@ class Reviewer:
         if ref.repository:
             return ref.repository.project.key, ref.repository.slug
         return ("", "")
+
+    @staticmethod
+    def _build_opt_out_branch_summary(keyword: str, branch: str) -> str:
+        return (
+            f"{NOERGLER_MARKER}\n"
+            "### Review skipped — opt-out keyword in branch name 🛑\n\n"
+            f"The source branch `{branch}` contains the opt-out keyword "
+            f"`{keyword}`, so the auto-review was skipped. No LLM or Jira "
+            "calls were made for this PR.\n\n"
+            "**What to do**\n"
+            "- Rename the branch to remove the keyword and push again; the "
+            "next webhook event will trigger a full review.\n"
+            "- Or @mention the bot explicitly in a comment if you want a "
+            "one-off review on this branch — mentions are not muted.\n\n"
+            "**Configure**\n"
+            "- The keyword is set via `REVIEW_OPT_OUT_BRANCH_KEYWORD` on the "
+            "noergler service (empty string disables the feature).\n"
+        )
 
     @staticmethod
     def _build_agents_md_missing_summary() -> str:

@@ -46,6 +46,7 @@ class ReviewConfig(BaseModel):
     mention_prompt_template: str = "prompts/mention.txt"
     ticket_compliance_check: bool = True
     require_agents_md: bool = True
+    opt_out_branch_keyword: str = "noergloff"
 
     @field_validator("auto_review_authors", mode="before")
     @classmethod
@@ -139,6 +140,7 @@ def load_config() -> AppConfig:
             mention_prompt_template=_env("REVIEW_MENTION_PROMPT_TEMPLATE", "prompts/mention.txt"),
             ticket_compliance_check=_env("REVIEW_TICKET_COMPLIANCE_CHECK", "true").lower() in ("true", "1", "yes"),
             require_agents_md=_env("REVIEW_REQUIRE_AGENTS_MD", "true").lower() in ("true", "1", "yes"),
+            opt_out_branch_keyword=_env("REVIEW_OPT_OUT_BRANCH_KEYWORD", "noergloff"),
         ),
         jira=JiraConfig(
             url=_env("JIRA_URL"),

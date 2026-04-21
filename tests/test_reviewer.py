@@ -357,6 +357,57 @@ class TestReviewer:
         assert NOERGLER_MARKER in summary
 
     @pytest.mark.asyncio
+    async def test_review_skipped_when_branch_contains_opt_out_keyword(self, mock_bitbucket, mock_llm):
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        payload = _make_payload("username", branch="feature/x-noergloff")
+        await rev.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_not_called()
+        mock_bitbucket.fetch_pr_diff.assert_not_called()
+        mock_bitbucket.fetch_file_content.assert_not_called()
+        mock_bitbucket.post_inline_comment.assert_not_called()
+        mock_bitbucket.post_pr_comment.assert_called_once()
+        summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "noergloff" in summary_text
+        assert "feature/x-noergloff" in summary_text
+        assert "REVIEW_OPT_OUT_BRANCH_KEYWORD" in summary_text
+
+    @pytest.mark.asyncio
+    async def test_opt_out_keyword_match_is_case_insensitive(self, mock_bitbucket, mock_llm):
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        payload = _make_payload("username", branch="FEATURE/NOERGLOFF-123")
+        await rev.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_not_called()
+        mock_bitbucket.post_pr_comment.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_opt_out_disabled_when_keyword_empty(self, mock_bitbucket, mock_llm):
+        rev = Reviewer(
+            mock_bitbucket, mock_llm,
+            _review_config(opt_out_branch_keyword="", require_agents_md=False),
+            db_pool=AsyncMock(),
+        )
+        payload = _make_payload("username", branch="feature/x-noergloff")
+        await rev.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_opt_out_does_not_affect_non_matching_branch(self, reviewer, mock_llm):
+        payload = _make_payload("username", branch="feature/normal-work")
+        await reviewer.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_called_once()
+
+    def test_build_opt_out_branch_summary_mentions_keyword_and_branch(self):
+        summary = Reviewer._build_opt_out_branch_summary("noergloff", "feature/x-noergloff")
+        assert "noergloff" in summary
+        assert "feature/x-noergloff" in summary
+        assert "REVIEW_OPT_OUT_BRANCH_KEYWORD" in summary
+        assert NOERGLER_MARKER in summary
+
+    @pytest.mark.asyncio
     async def test_content_fetch_failure_falls_back_to_diff_only(self, mock_bitbucket, mock_llm):
         mock_bitbucket.fetch_file_content = AsyncMock(side_effect=Exception("not found"))
         rev = Reviewer(
