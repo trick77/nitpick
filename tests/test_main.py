@@ -76,7 +76,6 @@ def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
 def client():
     mock_config = type("C", (), {
         "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET, "username": "noergler"})(),
-        "review": type("R", (), {"debounce_seconds": 0.0})(),
     })()
     mock_reviewer = AsyncMock()
     mock_reviewer.review_pull_request = AsyncMock()
@@ -85,12 +84,19 @@ def client():
     mock_reviewer.handle_pr_merged = AsyncMock()
     mock_reviewer.handle_pr_deleted = AsyncMock()
 
-    from app.debounce import PRDebouncer
-    mock_debouncer = PRDebouncer(delay_seconds=0.0)
+    # A stub review queue that invokes the reviewer synchronously on submit,
+    # so existing assertions on review_pull_request.await_count keep working
+    # without waiting on a real worker.
+    class _StubQueue:
+        def submit(self, key, payload):
+            asyncio.ensure_future(mock_reviewer.review_pull_request(payload))
+            return "queued"
+
+    import asyncio
 
     original_config = main_module.config
     original_reviewer = main_module.reviewer
-    original_debouncer = main_module.pr_debouncer
+    original_queue = main_module.review_queue
     original_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
@@ -99,7 +105,7 @@ def client():
 
     main_module.config = mock_config
     main_module.reviewer = mock_reviewer
-    main_module.pr_debouncer = mock_debouncer
+    main_module.review_queue = _StubQueue()
     app.router.lifespan_context = noop_lifespan
     try:
         with TestClient(app, raise_server_exceptions=False) as c:
@@ -107,7 +113,7 @@ def client():
     finally:
         main_module.config = original_config
         main_module.reviewer = original_reviewer
-        main_module.pr_debouncer = original_debouncer
+        main_module.review_queue = original_queue
         app.router.lifespan_context = original_lifespan
 
 
@@ -251,48 +257,65 @@ class TestEventKeyAllowList:
         assert resp.json()["status"] == "accepted"
 
 
-class TestDebounceIntegration:
-    def test_rapid_from_ref_updates_coalesce_to_single_review(self):
-        """Two pr:from_ref_updated events within the debounce window → one review."""
-        from app.debounce import PRDebouncer
+class TestQueueIntegration:
+    def test_rapid_from_ref_updates_are_bounded_via_queue(self):
+        """Rapid pr:from_ref_updated events produce at most 2 reviews total.
+
+        First submit always returns "queued". Subsequent submits arriving
+        while the key is still pending in the queue return "superseded"; if
+        the worker has already dequeued the first entry, a subsequent submit
+        returns "queued" for the next (deduped) slot. Either way, three
+        rapid submits result in no more than two actual review runs.
+        """
+        import asyncio as _asyncio
+        import time
+
+        from app.review_queue import ReviewQueue
+
+        async def slow_review(payload):
+            await _asyncio.sleep(0.15)
 
         mock_config = type("C", (), {
             "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET, "username": "noergler"})(),
-            "review": type("R", (), {"debounce_seconds": 0.1})(),
         })()
         mock_reviewer = AsyncMock()
-        mock_reviewer.review_pull_request = AsyncMock()
+        mock_reviewer.review_pull_request = AsyncMock(side_effect=slow_review)
 
         original_config = main_module.config
         original_reviewer = main_module.reviewer
-        original_debouncer = main_module.pr_debouncer
+        original_queue = main_module.review_queue
         original_lifespan = app.router.lifespan_context
 
         @asynccontextmanager
-        async def noop_lifespan(_a):
-            yield
+        async def lifespan_with_queue(_a):
+            q = ReviewQueue(mock_reviewer.review_pull_request)
+            q.start()
+            main_module.review_queue = q
+            try:
+                yield
+            finally:
+                await q.stop()
 
         main_module.config = mock_config
         main_module.reviewer = mock_reviewer
-        main_module.pr_debouncer = PRDebouncer(delay_seconds=0.1)
-        app.router.lifespan_context = noop_lifespan
-        import time
+        app.router.lifespan_context = lifespan_with_queue
         try:
             with TestClient(app, raise_server_exceptions=False) as c:
                 payload = {**PR_PAYLOAD, "eventKey": "pr:from_ref_updated"}
                 body = json.dumps(payload).encode()
                 headers = {"X-Hub-Signature": _sign(body), "Content-Type": "application/json"}
-                r1 = c.post("/webhook", content=body, headers=headers)
-                r2 = c.post("/webhook", content=body, headers=headers)
-                assert r1.status_code == 200 and r2.status_code == 200
-                # TestClient runs the app on a background loop in another thread,
-                # so time.sleep lets that loop drain the debounced task.
-                time.sleep(0.3)
-                assert mock_reviewer.review_pull_request.await_count == 1
+                outcomes = [
+                    c.post("/webhook", content=body, headers=headers).json()["queue"]
+                    for _ in range(3)
+                ]
+                assert outcomes[0] == "queued"
+                assert "superseded" in outcomes
+                time.sleep(0.6)
+                assert mock_reviewer.review_pull_request.await_count <= 2
         finally:
             main_module.config = original_config
             main_module.reviewer = original_reviewer
-            main_module.pr_debouncer = original_debouncer
+            main_module.review_queue = original_queue
             app.router.lifespan_context = original_lifespan
 
 
