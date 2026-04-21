@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 from app.config import LLMConfig, ReviewConfig
 from app.copilot_auth import CopilotTokenProvider
 from app.models import ReviewFinding
+from app.rate_limit import AsyncTokenBucket
 
 # Static context-window map for Copilot-served models.
 # Values are total input context size in tokens; we reserve headroom for
@@ -460,6 +461,18 @@ class LLMClient:
         self.config = config
         self.review_config = review_config
         self._token_provider = token_provider
+        self._rate_limiter = AsyncTokenBucket(
+            name="llm",
+            rate_per_minute=config.rate_limit_per_minute,
+            burst=config.rate_limit_burst,
+        )
+        if self._rate_limiter.enabled:
+            logger.info(
+                "LLM rate limit: %.1f/min, burst %d",
+                config.rate_limit_per_minute, config.rate_limit_burst,
+            )
+        else:
+            logger.info("LLM rate limit: disabled")
 
         ctx = _context_window_for(config.model)
         if ctx is None:
@@ -896,6 +909,7 @@ class LLMClient:
                 "strict": True,
                 "schema": response_schema,
             }}
+        await self._rate_limiter.acquire()
         response = await self.openai_client.responses.create(**kwargs)
         text = response.output_text or ""
         usage = response.usage

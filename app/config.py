@@ -27,6 +27,8 @@ class LLMConfig(BaseModel):
     api_url: str = "https://api.business.githubcopilot.com"
     integration_id: str = "vscode-chat"
     editor_version: str = "vscode/1.99.0"
+    rate_limit_per_minute: float = 10.0
+    rate_limit_burst: int = 3
 
     @field_validator("api_url", mode="after")
     @classmethod
@@ -47,6 +49,7 @@ class ReviewConfig(BaseModel):
     ticket_compliance_check: bool = True
     require_agents_md: bool = True
     opt_out_branch_keyword: str = "noergloff"
+    debounce_seconds: float = 30.0
 
     @field_validator("auto_review_authors", mode="before")
     @classmethod
@@ -127,6 +130,8 @@ def load_config() -> AppConfig:
             api_url=_env("COPILOT_API_URL", "https://api.business.githubcopilot.com"),
             integration_id=_env("COPILOT_INTEGRATION_ID", "vscode-chat"),
             editor_version=_env("COPILOT_EDITOR_VERSION", "vscode/1.99.0"),
+            rate_limit_per_minute=float(_env("RATE_LIMIT_LLM_PER_MINUTE", "10")),
+            rate_limit_burst=int(_env("RATE_LIMIT_LLM_BURST", "3")),
         ),
         review=ReviewConfig(
             auto_review_authors=[a.strip() for a in _env("REVIEW_AUTO_REVIEW_AUTHORS", "").split(",") if a.strip()],
@@ -141,6 +146,7 @@ def load_config() -> AppConfig:
             ticket_compliance_check=_env("REVIEW_TICKET_COMPLIANCE_CHECK", "true").lower() in ("true", "1", "yes"),
             require_agents_md=_env("REVIEW_REQUIRE_AGENTS_MD", "true").lower() in ("true", "1", "yes"),
             opt_out_branch_keyword=_env("REVIEW_OPT_OUT_BRANCH_KEYWORD", "noergloff"),
+            debounce_seconds=float(_env("REVIEW_DEBOUNCE_SECONDS", "30")),
         ),
         jira=JiraConfig(
             url=_env("JIRA_URL"),

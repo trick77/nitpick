@@ -76,6 +76,7 @@ def _sign(body: bytes, secret: str = WEBHOOK_SECRET) -> str:
 def client():
     mock_config = type("C", (), {
         "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET, "username": "noergler"})(),
+        "review": type("R", (), {"debounce_seconds": 0.0})(),
     })()
     mock_reviewer = AsyncMock()
     mock_reviewer.review_pull_request = AsyncMock()
@@ -84,8 +85,12 @@ def client():
     mock_reviewer.handle_pr_merged = AsyncMock()
     mock_reviewer.handle_pr_deleted = AsyncMock()
 
+    from app.debounce import PRDebouncer
+    mock_debouncer = PRDebouncer(delay_seconds=0.0)
+
     original_config = main_module.config
     original_reviewer = main_module.reviewer
+    original_debouncer = main_module.pr_debouncer
     original_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
@@ -94,6 +99,7 @@ def client():
 
     main_module.config = mock_config
     main_module.reviewer = mock_reviewer
+    main_module.pr_debouncer = mock_debouncer
     app.router.lifespan_context = noop_lifespan
     try:
         with TestClient(app, raise_server_exceptions=False) as c:
@@ -101,6 +107,7 @@ def client():
     finally:
         main_module.config = original_config
         main_module.reviewer = original_reviewer
+        main_module.pr_debouncer = original_debouncer
         app.router.lifespan_context = original_lifespan
 
 

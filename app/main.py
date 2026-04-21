@@ -11,6 +11,7 @@ from app.bitbucket import BitbucketClient
 from app.config import AppConfig, load_config, log_config
 from app.copilot_auth import CopilotTokenProvider
 from app.db import close_pool, create_pool
+from app.debounce import PRDebouncer
 from app.llm_client import LLMClient
 from app.jira import JiraClient
 from app.models import WebhookPayload
@@ -48,11 +49,12 @@ bitbucket_client: BitbucketClient = cast(BitbucketClient, None)
 llm_client: LLMClient = cast(LLMClient, None)
 jira_client: JiraClient = cast(JiraClient, None)
 copilot_token_provider: CopilotTokenProvider = cast(CopilotTokenProvider, None)
+pr_debouncer: PRDebouncer = cast(PRDebouncer, None)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global config, reviewer, bitbucket_client, llm_client, jira_client, copilot_token_provider
+    global config, reviewer, bitbucket_client, llm_client, jira_client, copilot_token_provider, pr_debouncer
 
     _unify_uvicorn_logging()
     config = load_config()
@@ -130,10 +132,16 @@ async def lifespan(_app: FastAPI):
         server_config=config.server,
         db_pool=db_pool,
     )
+    pr_debouncer = PRDebouncer(delay_seconds=config.review.debounce_seconds)
+    logger.info(
+        "PR debounce window: %.1fs (pr:from_ref_updated events)",
+        config.review.debounce_seconds,
+    )
     logger.info("Bridge service started, model=%s, api_url=%s", config.llm.model, config.llm.api_url)
 
     yield
 
+    await pr_debouncer.shutdown()
     await bitbucket_client.close()
     await llm_client.close()
     await jira_client.close()
@@ -222,6 +230,18 @@ async def webhook(
             event_key,
         )
         return {"status": "ignored", "reason": f"unhandled event: {event_key}"}
+
+    if event_key == "pr:from_ref_updated" and pr_debouncer.enabled:
+        pr = payload.pullRequest
+        repo = (pr.toRef.repository or pr.fromRef.repository)
+        if repo is not None:
+            key = (repo.project.key, repo.slug, pr.id)
+            pr_debouncer.schedule(key, lambda: reviewer.review_pull_request(payload))
+            return {
+                "status": "accepted",
+                "pr_id": pr.id,
+                "debounced_seconds": config.review.debounce_seconds,
+            }
 
     background_tasks.add_task(reviewer.review_pull_request, payload)
     return {"status": "accepted", "pr_id": payload.pullRequest.id}
