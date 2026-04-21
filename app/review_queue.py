@@ -63,7 +63,9 @@ class ReviewQueue:
         """
         tag = self._tag(key)
         if key in self._pending:
-            self._pending[key].payload = payload
+            entry = self._pending[key]
+            entry.payload = payload
+            entry.enqueued_at = time.monotonic()
             logger.info(
                 "queue[%s]: superseded pending payload (depth=%d)",
                 tag, self._queue.qsize(),

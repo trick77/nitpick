@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -91,8 +92,6 @@ def client():
         def submit(self, key, payload):
             asyncio.ensure_future(mock_reviewer.review_pull_request(payload))
             return "queued"
-
-    import asyncio
 
     original_config = main_module.config
     original_reviewer = main_module.reviewer
@@ -267,13 +266,12 @@ class TestQueueIntegration:
         returns "queued" for the next (deduped) slot. Either way, three
         rapid submits result in no more than two actual review runs.
         """
-        import asyncio as _asyncio
         import time
 
         from app.review_queue import ReviewQueue
 
         async def slow_review(payload):
-            await _asyncio.sleep(0.15)
+            await asyncio.sleep(0.15)
 
         mock_config = type("C", (), {
             "bitbucket": type("B", (), {"webhook_secret": WEBHOOK_SECRET, "username": "noergler"})(),
