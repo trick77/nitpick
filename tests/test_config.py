@@ -122,3 +122,25 @@ def test_ticket_compliance_check_default_from_env(monkeypatch):
         monkeypatch.setenv(k, v)
     config = load_config()
     assert config.review.ticket_compliance_check is True
+
+
+def test_opt_out_branch_keyword_default():
+    assert ReviewConfig().opt_out_branch_keyword == "noergloff"
+
+
+def test_opt_out_branch_keyword_from_env(monkeypatch):
+    env = {
+        "BITBUCKET_URL": "https://bb.example.com",
+        "BITBUCKET_TOKEN": "tok",
+        "BITBUCKET_WEBHOOK_SECRET": "sec",
+        "BITBUCKET_USERNAME": "bot",
+        "COPILOT_OAUTH_TOKEN": "ghp_tok",
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_TOKEN": "jira-tok",
+        "DATABASE_URL": "postgresql://u:p@localhost/db",
+        "REVIEW_OPT_OUT_BRANCH_KEYWORD": "skipme",
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    config = load_config()
+    assert config.review.opt_out_branch_keyword == "skipme"
