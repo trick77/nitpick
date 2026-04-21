@@ -209,6 +209,8 @@ Drop an `AGENTS.md` file in the repository root to provide project-specific revi
 
 By default, reviews are **gated** on the presence of `AGENTS.md` — without one, noergler skips the review and posts a short summary comment explaining why. To review PRs without an `AGENTS.md`, set `REVIEW_REQUIRE_AGENTS_MD=false`.
 
+The review summary reports how many tokens `AGENTS.md` consumes against a configurable soft limit (`REVIEW_AGENTS_MD_WARN_TOKENS`, default `4000`). When the file exceeds that limit, the summary flags it as a **context bloat** risk so you know to trim it. Reviews still run either way — this is a warning, not a hard cap.
+
 ## Running tests
 
 ```bash

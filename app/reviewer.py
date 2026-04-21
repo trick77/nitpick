@@ -1023,7 +1023,23 @@ class Reviewer:
         # --- Scope
         scope: list[str] = []
         if agents_md_found:
-            scope.append("Using project-specific review guidelines from `AGENTS.md` ✅")
+            agents_md_tokens = (prompt_breakdown or {}).get("repo_instructions")
+            warn_threshold = self.review_config.agents_md_warn_tokens
+            if agents_md_tokens and warn_threshold > 0:
+                pct = round(agents_md_tokens / warn_threshold * 100)
+                if agents_md_tokens > warn_threshold:
+                    scope.append(
+                        f"Using project-specific review guidelines from `AGENTS.md` "
+                        f"(~{agents_md_tokens} / {warn_threshold} tokens, {pct}%) — "
+                        f"risk of context bloat, consider trimming ⚠️"
+                    )
+                else:
+                    scope.append(
+                        f"Using project-specific review guidelines from `AGENTS.md` "
+                        f"(~{agents_md_tokens} / {warn_threshold} tokens, {pct}%) ✅"
+                    )
+            else:
+                scope.append("Using project-specific review guidelines from `AGENTS.md` ✅")
         else:
             scope.append(
                 "Tip: Add an `AGENTS.md` to your repository root with project-specific "
