@@ -14,6 +14,7 @@ from app.db import close_pool, create_pool
 from app.llm_client import LLMClient
 from app.jira import JiraClient
 from app.models import WebhookPayload
+from app.review_queue import ReviewQueue
 from app.reviewer import Reviewer
 
 logging.basicConfig(
@@ -48,11 +49,12 @@ bitbucket_client: BitbucketClient = cast(BitbucketClient, None)
 llm_client: LLMClient = cast(LLMClient, None)
 jira_client: JiraClient = cast(JiraClient, None)
 copilot_token_provider: CopilotTokenProvider = cast(CopilotTokenProvider, None)
+review_queue: ReviewQueue = cast(ReviewQueue, None)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    global config, reviewer, bitbucket_client, llm_client, jira_client, copilot_token_provider
+    global config, reviewer, bitbucket_client, llm_client, jira_client, copilot_token_provider, review_queue
 
     _unify_uvicorn_logging()
     config = load_config()
@@ -130,10 +132,13 @@ async def lifespan(_app: FastAPI):
         server_config=config.server,
         db_pool=db_pool,
     )
+    review_queue = ReviewQueue(reviewer.review_pull_request)
+    review_queue.start()
     logger.info("Bridge service started, model=%s, api_url=%s", config.llm.model, config.llm.api_url)
 
     yield
 
+    await review_queue.stop()
     await bitbucket_client.close()
     await llm_client.close()
     await jira_client.close()
@@ -223,5 +228,11 @@ async def webhook(
         )
         return {"status": "ignored", "reason": f"unhandled event: {event_key}"}
 
-    background_tasks.add_task(reviewer.review_pull_request, payload)
-    return {"status": "accepted", "pr_id": payload.pullRequest.id}
+    pr = payload.pullRequest
+    repo = pr.toRef.repository or pr.fromRef.repository
+    if repo is None:
+        logger.error("Review event for PR %d missing repository info", pr.id)
+        return {"status": "ignored", "reason": "missing repository"}
+    key = (repo.project.key, repo.slug, pr.id)
+    outcome = review_queue.submit(key, payload)
+    return {"status": "accepted", "pr_id": pr.id, "queue": outcome}
