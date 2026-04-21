@@ -649,6 +649,26 @@ class TestSortAndLimit:
         assert "tokens," not in summary
         assert "context bloat" not in summary
 
+    def test_build_summary_agents_md_warn_disabled(self, mock_bitbucket, mock_llm):
+        """agents_md_warn_tokens=0 disables the token-count annotation entirely."""
+        from app.reviewer import Reviewer
+        reviewer = Reviewer(
+            mock_bitbucket, mock_llm,
+            _review_config(agents_md_warn_tokens=0),
+            db_pool=AsyncMock(),
+        )
+        findings = [
+            ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),
+        ]
+        summary = reviewer._build_summary(
+            findings,
+            agents_md_found=True,
+            prompt_breakdown={"template": 100, "repo_instructions": 9999, "files": 500},
+        )
+        assert "Using project-specific review guidelines from `AGENTS.md` ✅" in summary
+        assert "tokens," not in summary
+        assert "context bloat" not in summary
+
     def test_build_summary_skipped_files(self, reviewer):
         findings = [
             ReviewFinding(file="a.py", line=1, severity="warning", comment="warn"),

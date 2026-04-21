@@ -893,6 +893,17 @@ class Reviewer:
     def _plural(n: int, word: str) -> str:
         return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
+    def _format_agents_md_scope_line(self, agents_md_tokens: int | None) -> str:
+        base = "Using project-specific review guidelines from `AGENTS.md`"
+        warn_threshold = self.review_config.agents_md_warn_tokens
+        if not agents_md_tokens or warn_threshold <= 0:
+            return f"{base} ✅"
+        pct = round(agents_md_tokens / warn_threshold * 100)
+        stats = f"(~{agents_md_tokens} / {warn_threshold} tokens, {pct}%)"
+        if agents_md_tokens > warn_threshold:
+            return f"{base} {stats} — risk of context bloat, consider trimming ⚠️"
+        return f"{base} {stats} ✅"
+
     def _build_summary(
         self,
         findings: list[ReviewFinding],
@@ -1023,23 +1034,9 @@ class Reviewer:
         # --- Scope
         scope: list[str] = []
         if agents_md_found:
-            agents_md_tokens = (prompt_breakdown or {}).get("repo_instructions")
-            warn_threshold = self.review_config.agents_md_warn_tokens
-            if agents_md_tokens and warn_threshold > 0:
-                pct = round(agents_md_tokens / warn_threshold * 100)
-                if agents_md_tokens > warn_threshold:
-                    scope.append(
-                        f"Using project-specific review guidelines from `AGENTS.md` "
-                        f"(~{agents_md_tokens} / {warn_threshold} tokens, {pct}%) — "
-                        f"risk of context bloat, consider trimming ⚠️"
-                    )
-                else:
-                    scope.append(
-                        f"Using project-specific review guidelines from `AGENTS.md` "
-                        f"(~{agents_md_tokens} / {warn_threshold} tokens, {pct}%) ✅"
-                    )
-            else:
-                scope.append("Using project-specific review guidelines from `AGENTS.md` ✅")
+            scope.append(self._format_agents_md_scope_line(
+                (prompt_breakdown or {}).get("repo_instructions"),
+            ))
         else:
             scope.append(
                 "Tip: Add an `AGENTS.md` to your repository root with project-specific "

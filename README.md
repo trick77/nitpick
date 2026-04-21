@@ -19,7 +19,7 @@ Brings automated AI code review to on-premise Bitbucket Server installations. Re
 - Smart context enrichment — fetches full file content, not just diffs, for better AI understanding
 - Asymmetric and dynamic diff context expansion with language-aware scope detection
 - Token-aware chunking and compression for large PRs
-- Prompt-cache-optimised template layout — stable rules and examples first, per-PR variables (tone, ticket, diff) last, so repeated reviews maximise LLM prompt-cache reuse and the diff lands where model recall is strongest
+- Prompt-cache-optimised template layout — stable rules and examples first, per-PR variables (ticket context, diff) last, so repeated reviews maximise LLM prompt-cache reuse and the diff lands where model recall is strongest
 - Jira ticket compliance checking against acceptance criteria
 - Project-specific review guidelines via `AGENTS.md`
 - Comment deduplication against existing review comments
@@ -44,7 +44,20 @@ Besides automatic reviews on PR open/modify, you can mention noergler in any PR 
 - **Ask a question** — `@noergler Why was this endpoint changed?` — noergler replies to your comment with an answer based on the PR diff.
 - **Trigger a full review** — `@noergler review` — Runs a full review as if the PR was just opened. Also triggered by `@noergler` with no text, `re-review`, or `rereview`.
 
-The mention trigger name defaults to `noergler` and can be changed via `REVIEW_MENTION_TRIGGER`.
+The mention trigger is `@<BITBUCKET_USERNAME>` — whichever Bitbucket service account noergler runs as. Configure it via the `BITBUCKET_USERNAME` env var.
+
+## Summary comment
+
+Alongside the inline findings, noergler posts (or updates) a single summary comment on each PR with at-a-glance health info:
+
+- **Top findings** — severity-sorted excerpt of the review comments, capped to a few lines.
+- **Scope** — whether an `AGENTS.md` was used (with token count against `REVIEW_AGENTS_MD_WARN_TOKENS` so you can spot context bloat), plus Jira ticket status or a tip if none was found.
+- **Ticket compliance** — per-acceptance-criterion verdict (✅ / ❌) when `REVIEW_TICKET_COMPLIANCE_CHECK` is on and a Jira ticket is linked.
+- **Reviewed / skipped files** — counts, added/removed line totals, and which files were skipped (lock files, binaries, config).
+- **Token usage** — prompt / completion token counts for the run.
+- **Last reviewed commit** — so incremental reviews on `pr:from_ref_updated` know where to start.
+
+On every `pr:from_ref_updated` the existing comment is updated in place rather than duplicated, so the PR activity stream stays clean.
 
 ## Quick start
 
@@ -185,7 +198,7 @@ All webhook requests must include a valid `X-Hub-Signature` header (HMAC-SHA256)
 
 ### Review prompt
 
-Edit `prompts/review.txt` to change the review focus, tone, or output format. The prompt template uses `{files}` and `{repo_instructions}` as placeholders. The prompts directory is mounted as a volume, so changes take effect on the next review without rebuilding.
+Edit `prompts/review.txt` to change the review focus or output format. The prompt template uses `{files}` and `{repo_instructions}` as placeholders. The prompts directory is mounted as a volume, so changes take effect on the next review without rebuilding.
 
 ### Prompt layout
 
