@@ -649,13 +649,17 @@ class Reviewer:
                 logger.info("%s merged — no review comments", pr_tag)
                 return
 
-            disagreed = 0
+            disagreed_parent_ids: set[int] = set()
             for c in comments:
                 parent_id = c.get("parent_id")
-                if parent_id in noergler_inline and not _is_bot_comment(c, bot_username):
-                    if classify_feedback(c.get("text", "")) == "negative":
-                        disagreed += 1
+                if parent_id is None or parent_id not in noergler_inline:
+                    continue
+                if _is_bot_comment(c, bot_username):
+                    continue
+                if classify_feedback(c.get("text", "")) == "negative":
+                    disagreed_parent_ids.add(parent_id)
 
+            disagreed = len(disagreed_parent_ids)
             total = len(noergler_inline)
             useful_pct = (total - disagreed) / total * 100
             logger.info(
@@ -727,6 +731,19 @@ class Reviewer:
             classification = classify_feedback(comment.text)
             if classification != "negative":
                 logger.debug("Feedback skipped on %s: classified as %s", pr_tag, classification)
+                return
+
+            already_disagreed = await _safe_db(
+                repository.has_negative_feedback(
+                    self.db_pool, project_key, repo_slug, pr.id, parent_id,
+                ),
+                fallback=False,
+            )
+            if already_disagreed:
+                logger.info(
+                    "Feedback skipped on %s: parent %d already has a negative feedback",
+                    pr_tag, parent_id,
+                )
                 return
 
             logger.info(

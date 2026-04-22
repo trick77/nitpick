@@ -1,10 +1,10 @@
 _DISAGREE = "disagree"
 
 _DISAGREE_RESPONSE = (
-    "I'm truly sorry for the bad review comment — please forgive me! 🙏 "
     "This disagree has been recorded as a negative signal against my overall "
-    "review-quality metric. Kindly only reply `disagree` when the finding is "
-    "**technically wrong** or **hallucinated**."
+    "review-quality metric. Please reserve `disagree` for findings that are "
+    "**technically wrong** or **hallucinated**. If that was the case here, "
+    "sincere apologies 🙏"
 )
 
 
