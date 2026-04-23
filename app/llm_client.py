@@ -21,6 +21,7 @@ _MODEL_CONTEXT_WINDOW: dict[str, int] = {
     "gpt-5": 272_000,
     "gpt-5-mini": 272_000,
     "gpt-5.3-codex": 272_000,
+    "gpt-5.4": 272_000,
     "claude-sonnet-4": 200_000,
     "claude-sonnet-4.5": 200_000,
     "claude-opus-4": 200_000,

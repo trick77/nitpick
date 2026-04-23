@@ -22,7 +22,7 @@ class BitbucketConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    model: str = "gpt-5.3-codex"
+    model: str = "gpt-5.4"
     oauth_token: str
     api_url: str = "https://api.business.githubcopilot.com"
     integration_id: str = "vscode-chat"
@@ -123,7 +123,7 @@ def load_config() -> AppConfig:
             username=_env("BITBUCKET_USERNAME"),
         ),
         llm=LLMConfig(
-            model=_env("COPILOT_MODEL", "gpt-5.3-codex"),
+            model=_env("COPILOT_MODEL", "gpt-5.4"),
             oauth_token=_env("COPILOT_OAUTH_TOKEN"),
             api_url=_env("COPILOT_API_URL", "https://api.business.githubcopilot.com"),
             integration_id=_env("COPILOT_INTEGRATION_ID", "vscode-chat"),
