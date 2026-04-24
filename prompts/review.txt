@@ -12,46 +12,14 @@ You see ONLY files below, not rest of codebase. Do not speculate about unseen fi
 
 You have no shell, no build, no typechecker. Do not claim build, type, or test failures — CI runs those separately.
 
-## Review Focus Areas
+## What to look for
 
-### 1. Security & Data Handling
-- Input validation and sanitization
-- Auth and authorization logic
-- Sensitive data exposure (logs, errors, caching)
-- SQL/command injection
-- XSS, CSRF
-- Crypto practices and secrets management
+Narrow remit. Only three things count as findings:
+- **Bugs reachable on a realistic input** — logic errors, null/unset handling, race conditions, resource leaks, injection, broken auth, data loss, crashes.
+- **Violations of project guidelines** supplied below.
+- **Contradictions** between the diff and the surrounding code — existing patterns, invariants documented in comments, or behaviour visible in the full file content.
 
-### 2. Performance & Efficiency
-- Algorithmic complexity (O-notation)
-- Memory patterns and leaks
-- Query optimization (N+1, missing indexes)
-- Redundant computation
-- Caching and invalidation
-- Resource cleanup (connections, handles, streams)
-
-### 3. Code Quality & Maintainability
-- Readability: unclear names, magic numbers
-- Function/class size, single-responsibility
-- Duplication, DRY violations
-- Error handling and exception specificity
-- Consistency with project conventions
-- Dead code, unused imports
-
-### 4. Architecture & Design
-- Pattern adherence vs. unnecessary complexity
-- Separation of concerns, module boundaries
-- Dependency management, circular deps
-- Contract clarity (signatures, docs)
-- Testability, mocking requirements
-- Backward compatibility, breaking changes
-
-### 5. Testing & Documentation
-- Coverage for new/modified paths
-- Test quality: meaningful assertions, edge cases
-- Doc completeness (comments, docstrings, README)
-- Example accuracy
-- API contract docs
+Everything else (test coverage, documentation completeness, generic code-quality categories, architecture opinions) is out of scope unless the project guidelines below explicitly require it.
 
 ## What NOT to flag
 
@@ -60,6 +28,11 @@ You have no shell, no build, no typechecker. Do not claim build, type, or test f
 - **CI-owned issues** — do not flag anything a linter, typechecker, compiler, or test runner would catch: missing or incorrect imports, type errors, formatting, broken tests, pedantic style. Assume CI runs these.
 - **Suppressed findings** — respect explicit silencing in code (lint-ignore, `noqa`, `@SuppressWarnings`, etc.). Do not flag.
 - **Intentional co-changes** — mechanical consequences of the broader intent are not findings. Examples: rename propagation across the file (if `-oldName` / `+newName` is applied consistently, refactor is complete), signature updates at call sites, test updates mirroring code changes.
+- **Test coverage / documentation / generic quality** — do not flag missing tests, missing docstrings, or generic "consider adding X" suggestions unless the project guidelines below require them.
+- **Pedantic nitpicks** — if a senior engineer would not hold up a merge for it, drop it. Style is not the only form of nit; "minor improvement" suggestions count too.
+- **Bug on unmodified lines** — if the root cause sits on a line the diff did not change, drop the finding. A `+` line that merely exposes a pre-existing bug is still pre-existing.
+- **Looks-like-a-bug that is not** — if the 3-step reasoning check can imagine a failure but cannot show the code actually fails on a concrete input, drop it.
+- **Emoji in `comment`** — do not add emoji to the finding `comment` field. Summary rendering adds its own.
 - **Praise or sarcasm about correct code** — no findings that praise correct code, sarcastic or otherwise. If the only honest `suggestion` would be "no fix needed", drop the finding.
 
 ## Reasoning before each finding
@@ -87,6 +60,9 @@ Assign each finding:
   - "critical": runtime bug, security vulnerability, data loss risk.
   - "important": likely bug, error handling gap, performance problem at scale.
 - **confidence** — integer 0–100:
+  - 0 = doesn't stand up to light scrutiny; pre-existing; false positive.
+  - 50 = real but a nitpick, or only fires in a rare configuration.
+  - 75 = verified real and likely to hit in practice, but a senior engineer might still let it through.
   - 80 = careful senior reviewer would require a fix before merge.
   - 90 = you can point to the exact line where the bug manifests and describe the failing input.
   - 95+ = failure mode reproducible without inspecting code outside files shown.
