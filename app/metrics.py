@@ -66,7 +66,7 @@ async def reviewer_precision(
     request: Request,
     project_key: str | None = Query(None),
     repo_slug: str | None = Query(None),
-    since: datetime | None = Query(None, description="inclusive lower bound on week"),
+    since: datetime = Query(..., description="required inclusive lower bound on week"),
     until: datetime | None = Query(None, description="exclusive upper bound on week"),
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> dict[str, Any]:
@@ -76,8 +76,7 @@ async def reviewer_precision(
         params.append(project_key); clauses.append(f"project_key = ${len(params)}")
     if repo_slug is not None:
         params.append(repo_slug); clauses.append(f"repo_slug = ${len(params)}")
-    if since is not None:
-        params.append(since); clauses.append(f"week >= ${len(params)}")
+    params.append(since); clauses.append(f"week >= ${len(params)}")
     if until is not None:
         params.append(until); clauses.append(f"week < ${len(params)}")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -99,7 +98,7 @@ async def lead_time(
     project_key: str | None = Query(None),
     repo_slug: str | None = Query(None),
     author: str | None = Query(None),
-    since: datetime | None = Query(None, description="inclusive lower bound on merged_at"),
+    since: datetime = Query(..., description="required inclusive lower bound on merged_at"),
     until: datetime | None = Query(None, description="exclusive upper bound on merged_at"),
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> dict[str, Any]:
@@ -111,8 +110,7 @@ async def lead_time(
         params.append(repo_slug); clauses.append(f"repo_slug = ${len(params)}")
     if author is not None:
         params.append(author); clauses.append(f"author = ${len(params)}")
-    if since is not None:
-        params.append(since); clauses.append(f"merged_at >= ${len(params)}")
+    params.append(since); clauses.append(f"merged_at >= ${len(params)}")
     if until is not None:
         params.append(until); clauses.append(f"merged_at < ${len(params)}")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -132,7 +130,7 @@ async def lead_time(
 async def activity(
     request: Request,
     author: str | None = Query(None),
-    since: datetime | None = Query(None, description="inclusive lower bound on week"),
+    since: datetime = Query(..., description="required inclusive lower bound on week"),
     until: datetime | None = Query(None, description="exclusive upper bound on week"),
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> dict[str, Any]:
@@ -140,8 +138,7 @@ async def activity(
     params: list[Any] = []
     if author is not None:
         params.append(author); clauses.append(f"author = ${len(params)}")
-    if since is not None:
-        params.append(since); clauses.append(f"week >= ${len(params)}")
+    params.append(since); clauses.append(f"week >= ${len(params)}")
     if until is not None:
         params.append(until); clauses.append(f"week < ${len(params)}")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -161,7 +158,7 @@ async def activity(
 async def cost_by_model(
     request: Request,
     model: str | None = Query(None, description="filter by model_name"),
-    since: datetime | None = Query(None, description="inclusive lower bound on week"),
+    since: datetime = Query(..., description="required inclusive lower bound on week"),
     until: datetime | None = Query(None, description="exclusive upper bound on week"),
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
 ) -> dict[str, Any]:
@@ -169,8 +166,7 @@ async def cost_by_model(
     params: list[Any] = []
     if model is not None:
         params.append(model); clauses.append(f"model_name = ${len(params)}")
-    if since is not None:
-        params.append(since); clauses.append(f"week >= ${len(params)}")
+    params.append(since); clauses.append(f"week >= ${len(params)}")
     if until is not None:
         params.append(until); clauses.append(f"week < ${len(params)}")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
