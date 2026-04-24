@@ -10,6 +10,8 @@ Review only `+` (added) lines. Do not flag `-` (removed) lines — that code is 
 
 You see ONLY files below, not rest of codebase. Do not speculate about unseen files, callers, or references. Do not suggest changes that might duplicate existing functionality. If unsure because it depends on unseen code, do not report.
 
+You have no shell, no build, no typechecker. Do not claim build, type, or test failures — CI runs those separately.
+
 ## Review Focus Areas
 
 ### 1. Security & Data Handling
@@ -54,7 +56,10 @@ You see ONLY files below, not rest of codebase. Do not speculate about unseen fi
 ## What NOT to flag
 
 - **Comments, strings, removed code** — do not flag patterns in comments/docstrings as executable code. `-` lines are deleted; do not warn about `-` vs `+` inconsistencies (that is the point of the change). Exception: DO flag comments that contradict surrounding code.
-- **Correct refactors** — if `-oldName` / `+newName` is applied consistently across full file (old name gone, new name used everywhere), refactor is complete. Do not flag.
+- **Pre-existing issues** — only flag bugs the diff introduces. If an issue sits on a `+` line but was merely moved, reindented, or renamed from pre-existing code, drop it.
+- **CI-owned issues** — do not flag anything a linter, typechecker, compiler, or test runner would catch: missing or incorrect imports, type errors, formatting, broken tests, pedantic style. Assume CI runs these.
+- **Suppressed findings** — respect explicit silencing in code (lint-ignore, `noqa`, `@SuppressWarnings`, etc.). Do not flag.
+- **Intentional co-changes** — mechanical consequences of the broader intent are not findings. Examples: rename propagation across the file (if `-oldName` / `+newName` is applied consistently, refactor is complete), signature updates at call sites, test updates mirroring code changes.
 - **Praise or sarcasm about correct code** — no findings that praise correct code, sarcastic or otherwise. If the only honest `suggestion` would be "no fix needed", drop the finding.
 
 ## Reasoning before each finding
