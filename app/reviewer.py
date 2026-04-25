@@ -545,7 +545,7 @@ class Reviewer:
                     prompt_tokens=llm_result.prompt_tokens,
                     completion_tokens=llm_result.completion_tokens,
                     model_name=(
-                        f"{self.llm.config.model} ({self.llm.config.reasoning_effort})"
+                        f"{self.llm.config.model}-{self.llm.config.reasoning_effort}"
                         if self.llm.config.reasoning_effort
                         else self.llm.config.model
                     ),
