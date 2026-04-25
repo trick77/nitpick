@@ -120,14 +120,14 @@ class TestReviewerPrecision:
     def test_returns_rows(self):
         rows = [
             {"project_key": "PROJ", "repo_slug": "r", "week": datetime(2026, 4, 20, tzinfo=timezone.utc),
-             "n_posted": 10, "n_disagreed": 2, "precision": 0.8},
+             "n_posted": 10, "n_disagreed": 2, "precision_score": 0.8},
         ]
         c = _make_client(rows=rows)
         r = c.get("/metrics/reviewer-precision", params=_SINCE, headers=_AUTH)
         assert r.status_code == 200
         body = r.json()
         assert body["count"] == 1
-        assert body["rows"][0]["precision"] == 0.8
+        assert body["rows"][0]["precision_score"] == 0.8
         assert body["rows"][0]["week"].startswith("2026-04-20")
 
     def test_filters_compose(self):

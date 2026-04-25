@@ -276,7 +276,7 @@ curl -H "X-API-Key: $METRICS_API_KEY" \
   "https://noergler.internal/metrics/reviewer-precision?since=2026-01-01T00:00:00Z&project_key=PROJ"
 ```
 
-Merged and deleted PR data is retained indefinitely so historical metrics remain stable; deleted PRs are excluded from every view by filter.
+Merged and deleted PR data is retained indefinitely so historical metrics remain stable. Deleted PRs are filtered out of `v_reviewer_precision`, `v_lead_time`, and `v_activity_weekly`. `v_cost_by_model` does **not** filter them — tokens spent on later-deleted PRs are real spend and stay in the FinOps view.
 
 ### What these metrics tell you
 

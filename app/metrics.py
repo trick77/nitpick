@@ -7,14 +7,11 @@ key -> 503 (disabled).
 from __future__ import annotations
 
 import hmac
-import logging
 from datetime import datetime
 from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -82,7 +79,7 @@ async def reviewer_precision(
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     params.append(_bounded_limit(limit))
     sql = f"""
-        SELECT project_key, repo_slug, week, n_posted, n_disagreed, precision
+        SELECT project_key, repo_slug, week, n_posted, n_disagreed, precision_score
         FROM v_reviewer_precision
         {where}
         ORDER BY week DESC, project_key, repo_slug

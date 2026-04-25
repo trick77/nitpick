@@ -65,7 +65,7 @@ def upgrade() -> None:
                 WHEN p.n_posted > 0 THEN
                     ROUND(1 - COALESCE(d.n_disagreed, 0)::numeric / p.n_posted, 3)
                 ELSE NULL
-            END AS precision
+            END AS precision_score
         FROM posted p
         LEFT JOIN disagreed d
             ON d.project_key = p.project_key
