@@ -22,38 +22,37 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Reviewer precision = 1 - disagree_rate. Positive framing.
-    # feedback_events only holds "negative" (disagree) rows today,
-    # so COUNT(*) = disagreed.
+    # Both sides bucket by review_findings.created_at so a finding posted
+    # in week N and disagreed in week N+1 lands in the same row (the
+    # posting week). Otherwise a quiet week with old findings still being
+    # disagreed would yield a negative precision_score.
     op.execute("""
         CREATE VIEW v_reviewer_precision AS
         WITH posted AS (
             SELECT
-                rs.project_key,
-                rs.repo_slug,
-                DATE_TRUNC('week', rs.created_at) AS week,
-                SUM(rs.findings_posted) AS n_posted
-            FROM review_statistics rs
-            LEFT JOIN pr_reviews pr
-                ON pr.project_key = rs.project_key
-               AND pr.repo_slug   = rs.repo_slug
-               AND pr.pr_id       = rs.pr_id
-            WHERE pr.deleted_at IS NULL OR pr.id IS NULL
-            GROUP BY rs.project_key, rs.repo_slug, DATE_TRUNC('week', rs.created_at)
+                pr.project_key,
+                pr.repo_slug,
+                DATE_TRUNC('week', rf.created_at) AS week,
+                COUNT(*) AS n_posted
+            FROM review_findings rf
+            JOIN pr_reviews pr ON pr.id = rf.pr_review_id
+            WHERE pr.deleted_at IS NULL
+              AND rf.bitbucket_comment_id IS NOT NULL
+            GROUP BY pr.project_key, pr.repo_slug, DATE_TRUNC('week', rf.created_at)
         ),
         disagreed AS (
             SELECT
-                fe.project_key,
-                fe.repo_slug,
-                DATE_TRUNC('week', fe.created_at) AS week,
+                pr.project_key,
+                pr.repo_slug,
+                DATE_TRUNC('week', rf.created_at) AS week,
                 COUNT(*) AS n_disagreed
             FROM feedback_events fe
-            LEFT JOIN pr_reviews pr
-                ON pr.project_key = fe.project_key
-               AND pr.repo_slug   = fe.repo_slug
-               AND pr.pr_id       = fe.pr_id
+            JOIN review_findings rf
+                ON rf.bitbucket_comment_id = fe.bitbucket_comment_id
+            JOIN pr_reviews pr ON pr.id = rf.pr_review_id
             WHERE fe.classification = 'negative'
-              AND (pr.deleted_at IS NULL OR pr.id IS NULL)
-            GROUP BY fe.project_key, fe.repo_slug, DATE_TRUNC('week', fe.created_at)
+              AND pr.deleted_at IS NULL
+            GROUP BY pr.project_key, pr.repo_slug, DATE_TRUNC('week', rf.created_at)
         )
         SELECT
             p.project_key,
@@ -63,7 +62,7 @@ def upgrade() -> None:
             COALESCE(d.n_disagreed, 0) AS n_disagreed,
             CASE
                 WHEN p.n_posted > 0 THEN
-                    ROUND(1 - COALESCE(d.n_disagreed, 0)::numeric / p.n_posted, 3)
+                    ROUND(1 - COALESCE(d.n_disagreed, 0)::numeric / p.n_posted, 3)::float8
                 ELSE NULL
             END AS precision_score
         FROM posted p
@@ -124,8 +123,17 @@ def upgrade() -> None:
           AND deleted_at IS NULL
     """)
 
+    # Supports v_lead_time's ORDER BY merged_at DESC and the deleted_at
+    # filter. Partial index keeps it small — only live rows.
+    op.execute("""
+        CREATE INDEX idx_pr_reviews_lead_time
+        ON pr_reviews (merged_at DESC)
+        WHERE deleted_at IS NULL AND merged_at IS NOT NULL
+    """)
+
 
 def downgrade() -> None:
+    op.execute("DROP INDEX IF EXISTS idx_pr_reviews_lead_time")
     op.execute("DROP VIEW IF EXISTS v_lead_time")
     op.execute("DROP VIEW IF EXISTS v_cost_by_model")
     op.execute("DROP VIEW IF EXISTS v_activity_weekly")

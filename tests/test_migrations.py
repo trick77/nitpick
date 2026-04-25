@@ -54,6 +54,31 @@ def test_004_lead_time_requires_merged_and_opened_at():
     assert "opened_at IS NOT NULL" in text
 
 
+def test_004_precision_buckets_disagrees_by_finding_posted_week():
+    """Both CTEs must bucket by review_findings.created_at — otherwise a
+    finding posted in week N and disagreed in week N+1 splits across rows
+    and a quiet week shows precision_score < 0."""
+    text = (_VERSIONS / "004_metric_views.py").read_text()
+    # disagreed CTE joins via review_findings.bitbucket_comment_id
+    assert "rf.bitbucket_comment_id = fe.bitbucket_comment_id" in text
+    # both CTEs bucket by the same source column
+    assert text.count("DATE_TRUNC('week', rf.created_at)") >= 4  # 2 per CTE (SELECT + GROUP BY)
+    # the old per-feedback-event bucketing must be gone
+    assert "DATE_TRUNC('week', fe.created_at)" not in text
+
+
+def test_004_precision_score_cast_to_float8():
+    """asyncpg returns NUMERIC as Decimal; cast in SQL avoids per-FastAPI-version drift."""
+    text = (_VERSIONS / "004_metric_views.py").read_text()
+    assert "::float8" in text
+
+
+def test_004_creates_lead_time_supporting_index():
+    text = (_VERSIONS / "004_metric_views.py").read_text()
+    assert "CREATE INDEX idx_pr_reviews_lead_time" in text
+    assert "DROP INDEX IF EXISTS idx_pr_reviews_lead_time" in text
+
+
 def test_003_adds_lifecycle_columns():
     text = (_VERSIONS / "003_pr_lifecycle_timestamps.py").read_text()
     for col in ("opened_at", "merged_at", "deleted_at"):

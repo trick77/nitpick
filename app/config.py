@@ -105,8 +105,8 @@ class DatabaseConfig(BaseModel):
     url: str
 
 
-class MetricsConfig(BaseModel):
-    api_key: str = ""  # empty -> /metrics endpoints return 503
+class AnalyticsConfig(BaseModel):
+    api_key: str = ""  # empty -> /analytics endpoints return 503
 
 
 class AppConfig(BaseModel):
@@ -116,7 +116,7 @@ class AppConfig(BaseModel):
     jira: JiraConfig
     server: ServerConfig = ServerConfig()
     database: DatabaseConfig
-    metrics: MetricsConfig = MetricsConfig()
+    analytics: AnalyticsConfig = AnalyticsConfig()
 
 
 def _env(name: str, default: str | None = None) -> str:
@@ -131,12 +131,12 @@ _SECRET_FIELDS = {
     "llm": {"oauth_token"},
     "jira": {"token"},
     "database": {"url"},
-    "metrics": {"api_key"},
+    "analytics": {"api_key"},
 }
 
 
 def log_config(config: AppConfig, log: logging.Logger) -> None:
-    for section_name in ("bitbucket", "llm", "review", "jira", "server", "database", "metrics"):
+    for section_name in ("bitbucket", "llm", "review", "jira", "server", "database", "analytics"):
         section = getattr(config, section_name)
         secrets = _SECRET_FIELDS.get(section_name, set())
         log.info("[config.%s]", section_name)
@@ -189,7 +189,7 @@ def load_config() -> AppConfig:
         database=DatabaseConfig(
             url=_env("DATABASE_URL"),
         ),
-        metrics=MetricsConfig(
-            api_key=_env("METRICS_API_KEY", ""),
+        analytics=AnalyticsConfig(
+            api_key=_env("ANALYTICS_API_KEY", ""),
         ),
     )

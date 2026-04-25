@@ -129,7 +129,7 @@ Both `postgresql://` and `postgres://` URI schemes are accepted.
 | `review_statistics` | Per-review-run metrics — token usage, finding counts, timing |
 | `feedback_events` | Disagree reactions on review comments |
 
-Four read-only views expose derived metrics: `v_reviewer_precision`, `v_lead_time`, `v_activity_weekly`, `v_cost_by_model`. See the [Metrics API](#metrics-api).
+Four read-only views expose derived metrics: `v_reviewer_precision`, `v_lead_time`, `v_activity_weekly`, `v_cost_by_model`. See the [Analytics API](#analytics-api).
 
 **Running migrations:**
 
@@ -252,28 +252,28 @@ If you're behind a corporate proxy with custom CA certificates, copy `.crt` or `
 GET /health → {"status": "ok"}
 ```
 
-## Metrics API
+## Analytics API
 
-Optional read-only HTTP API for exporting the four metric views into dashboards or ad-hoc analysis. Disabled by default — set `METRICS_API_KEY` to enable.
+Optional read-only HTTP API for exporting the four metric views into dashboards or ad-hoc analysis. The path is `/analytics/*` (not `/metrics/*`) to avoid colliding with the Prometheus convention. Disabled by default — set `ANALYTICS_API_KEY` to enable.
 
 | Env var | Description |
 |---|---|
-| `METRICS_API_KEY` | Shared secret sent by clients as the `X-API-Key` header. Empty (default) → endpoints return `503`. Wrong or missing → `401`. |
+| `ANALYTICS_API_KEY` | Shared secret sent by clients as the `X-API-Key` header. Empty (default) → endpoints return `503`. Wrong or missing → `401`. |
 
 Endpoints (all `GET`, all require the header, all require a `since` query param):
 
 | Path | Answers | Framework |
 |---|---|---|
-| `/metrics/reviewer-precision` | How useful is the LLM review? `1 - disagree_rate` per repo × week. Higher = better. | DX Core 4 — Effectiveness (proxy); SPACE — Performance |
-| `/metrics/lead-time` | Lead-time per merged PR (`merged_at - opened_at`). | DORA — Lead Time for Changes; DX Core 4 — Speed; SPACE — Efficiency/Flow |
-| `/metrics/activity` | PRs and review runs per author × week. | SPACE — Activity; DX Core 4 — Speed |
-| `/metrics/cost-by-model` | Token spend and run count per model × week. | Operational / FinOps (not in DORA/SPACE/DX Core 4) |
+| `/analytics/reviewer-precision` | How useful is the LLM review? `1 - disagree_rate` per repo × week. Higher = better. | DX Core 4 — Effectiveness (proxy); SPACE — Performance |
+| `/analytics/lead-time` | Lead-time per merged PR (`merged_at - opened_at`). | DORA — Lead Time for Changes; DX Core 4 — Speed; SPACE — Efficiency/Flow |
+| `/analytics/activity` | PRs and review runs per author × week. | SPACE — Activity; DX Core 4 — Speed |
+| `/analytics/cost-by-model` | Token spend and run count per model × week. | Operational / FinOps (not in DORA/SPACE/DX Core 4) |
 
 Common query params: `since` (required, ISO 8601, inclusive lower bound on week or `merged_at`), `until` (optional, exclusive upper bound), `limit` (1–10 000, default 1 000). Endpoint-specific filters: `project_key`, `repo_slug`, `author`, `model`. All response bodies are `{"count": N, "rows": [...]}`.
 
 ```bash
-curl -H "X-API-Key: $METRICS_API_KEY" \
-  "https://noergler.internal/metrics/reviewer-precision?since=2026-01-01T00:00:00Z&project_key=PROJ"
+curl -H "X-API-Key: $ANALYTICS_API_KEY" \
+  "https://noergler.internal/analytics/reviewer-precision?since=2026-01-01T00:00:00Z&project_key=PROJ"
 ```
 
 Merged and deleted PR data is retained indefinitely so historical metrics remain stable. Deleted PRs are filtered out of `v_reviewer_precision`, `v_lead_time`, and `v_activity_weekly`. `v_cost_by_model` does **not** filter them — tokens spent on later-deleted PRs are real spend and stay in the FinOps view.
@@ -299,8 +299,8 @@ Merged and deleted PR data is retained indefinitely so historical metrics remain
 
 ```
 app/
-  main.py              # FastAPI app, /webhook, /health, /metrics endpoints
-  metrics.py           # Read-only /metrics API over the alembic 004 views
+  main.py              # FastAPI app, /webhook, /health, /analytics endpoints
+  analytics.py         # Read-only /analytics API over the alembic 004 views
   reviewer.py          # Review orchestrator (diff → AI → comments)
   llm_client.py        # OpenAI SDK client for the configured LLM API, token-aware chunking
   context_expansion.py # Asymmetric & dynamic diff context expansion
