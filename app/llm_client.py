@@ -9,7 +9,7 @@ import openai
 import tiktoken
 from openai import AsyncOpenAI
 
-from app.config import LLMConfig, ReviewConfig
+from app.config import LLMConfig, ReviewConfig, model_label
 from app.copilot_auth import CopilotTokenProvider
 from app.models import ReviewFinding
 
@@ -472,7 +472,7 @@ class LLMClient:
         self.max_tokens_per_chunk: int = max(2000, ctx - _CONTEXT_WINDOW_HEADROOM_TOKENS)
         logger.info(
             "Chunk budget set to %s tokens (model %s context window: %s)",
-            _fmt(self.max_tokens_per_chunk), config.model, _fmt(ctx),
+            _fmt(self.max_tokens_per_chunk), model_label(config.model, config.reasoning_effort), _fmt(ctx),
         )
 
         async def _inject_copilot_auth(request: httpx.Request) -> None:
@@ -529,9 +529,8 @@ class LLMClient:
         # exchange, network path, and model availability in one shot.
         try:
             logger.info(
-                "LLM inference request: %s/responses model=%s reasoning_effort=%s",
-                self.config.api_url.rstrip("/"), self.config.model,
-                self.config.reasoning_effort or "default",
+                "LLM inference request: %s/responses model=%s",
+                self.config.api_url.rstrip("/"), model_label(self.config.model, self.config.reasoning_effort),
             )
             ping_response = await self.openai_client.responses.create(
                 model=self.config.model,
@@ -543,9 +542,9 @@ class LLMClient:
             ping_text = (ping_response.output_text or "").strip()
             if not ping_text:
                 raise RuntimeError("empty response from model")
-            logger.info("Model %s ping OK (response: %s)", self.config.model, ping_text)
+            logger.info("Model %s ping OK (response: %s)", model_label(self.config.model, self.config.reasoning_effort), ping_text)
         except Exception as exc:
-            logger.error("Model %s ping FAILED: %r", self.config.model, exc)
+            logger.error("Model %s ping FAILED: %r", model_label(self.config.model, self.config.reasoning_effort), exc)
             raise
 
     @dataclass
@@ -889,7 +888,7 @@ class LLMClient:
         """
         logger.info(
             "LLM inference request: %s/responses model=%s",
-            self.config.api_url.rstrip("/"), self.config.model,
+            self.config.api_url.rstrip("/"), model_label(self.config.model, self.config.reasoning_effort),
         )
         kwargs: dict = {
             "model": self.config.model,

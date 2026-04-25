@@ -8,7 +8,7 @@ from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from typing import cast
 
 from app.bitbucket import BitbucketClient
-from app.config import AppConfig, load_config, log_config
+from app.config import AppConfig, load_config, log_config, model_label
 from app.copilot_auth import CopilotTokenProvider
 from app.db import close_pool, create_pool
 from app.llm_client import LLMClient
@@ -137,7 +137,7 @@ async def lifespan(_app: FastAPI):
     review_queue.start()
     _app.state.config = config
     _app.state.db_pool = db_pool
-    logger.info("Bridge service started, model=%s, api_url=%s", config.llm.model, config.llm.api_url)
+    logger.info("Bridge service started, model=%s, api_url=%s", model_label(config.llm.model, config.llm.reasoning_effort), config.llm.api_url)
 
     yield
 

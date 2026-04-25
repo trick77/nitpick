@@ -24,6 +24,12 @@ class BitbucketConfig(BaseModel):
 _REASONING_EFFORT_VALUES = frozenset({"minimal", "low", "medium", "high"})
 
 
+def model_label(model: str, reasoning_effort: str | None) -> str:
+    if reasoning_effort:
+        return f"{model}-{reasoning_effort}"
+    return model
+
+
 class LLMConfig(BaseModel):
     model: str = "gpt-5.4"
     oauth_token: str
