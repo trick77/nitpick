@@ -21,17 +21,37 @@ class BitbucketConfig(BaseModel):
     username: str
 
 
+_REASONING_EFFORT_VALUES = frozenset({"minimal", "low", "medium", "high"})
+
+
 class LLMConfig(BaseModel):
     model: str = "gpt-5.4"
     oauth_token: str
     api_url: str = "https://api.business.githubcopilot.com"
     integration_id: str = "vscode-chat"
     editor_version: str = "vscode/1.99.0"
+    reasoning_effort: str | None = "high"
 
     @field_validator("api_url", mode="after")
     @classmethod
     def strip_chat_completions_suffix(cls, v: str) -> str:
         return v.removesuffix("/chat/completions").rstrip("/")
+
+    @field_validator("reasoning_effort", mode="before")
+    @classmethod
+    def normalize_reasoning_effort(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip().lower()
+            if not stripped:
+                return None
+            if stripped not in _REASONING_EFFORT_VALUES:
+                raise ValueError(
+                    f"reasoning_effort must be one of {sorted(_REASONING_EFFORT_VALUES)}, got {v!r}"
+                )
+            return stripped
+        raise ValueError("reasoning_effort must be a string or None")
 
 
 class ReviewConfig(BaseModel):
@@ -134,6 +154,7 @@ def load_config() -> AppConfig:
             api_url=_env("COPILOT_API_URL", "https://api.business.githubcopilot.com"),
             integration_id=_env("COPILOT_INTEGRATION_ID", "vscode-chat"),
             editor_version=_env("COPILOT_EDITOR_VERSION", "vscode/1.99.0"),
+            reasoning_effort=os.environ.get("COPILOT_REASONING_EFFORT") or "high",
         ),
         review=ReviewConfig(
             auto_review_authors=[a.strip() for a in _env("REVIEW_AUTO_REVIEW_AUTHORS", "").split(",") if a.strip()],

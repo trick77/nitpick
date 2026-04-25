@@ -504,6 +504,12 @@ class LLMClient:
     async def close(self):
         await self.openai_client.close()
 
+    def _reasoning_kwargs(self) -> dict:
+        effort = self.config.reasoning_effort
+        if not effort:
+            return {}
+        return {"reasoning": {"effort": effort}}
+
     async def check_connectivity(self) -> None:
         prompt_overhead = count_tokens(
             self.prompt_template
@@ -523,14 +529,16 @@ class LLMClient:
         # exchange, network path, and model availability in one shot.
         try:
             logger.info(
-                "LLM inference request: %s/responses model=%s",
+                "LLM inference request: %s/responses model=%s reasoning_effort=%s",
                 self.config.api_url.rstrip("/"), self.config.model,
+                self.config.reasoning_effort or "default",
             )
             ping_response = await self.openai_client.responses.create(
                 model=self.config.model,
                 input=[{"role": "user", "content": [
                     {"type": "input_text", "text": "Reply with: ok"},
                 ]}],
+                **self._reasoning_kwargs(),
             )
             ping_text = (ping_response.output_text or "").strip()
             if not ping_text:
@@ -897,6 +905,7 @@ class LLMClient:
                 "strict": True,
                 "schema": response_schema,
             }}
+        kwargs.update(self._reasoning_kwargs())
         response = await self.openai_client.responses.create(**kwargs)
         text = response.output_text or ""
         usage = response.usage
