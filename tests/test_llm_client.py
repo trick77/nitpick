@@ -328,9 +328,13 @@ class TestIsReviewableDiff:
         assert not is_reviewable_diff(diff)
 
     def test_build_config_extensions_skipped(self):
-        for ext in [".xml", ".bat", ".cmd", ".properties"]:
+        for ext in [".bat", ".cmd", ".properties"]:
             diff = f"diff --git a/some/file{ext} b/some/file{ext}\n+content\n"
             assert not is_reviewable_diff(diff), f"{ext} should be skipped"
+
+    def test_xml_is_reviewable(self):
+        diff = "diff --git a/db/changelog.xml b/db/changelog.xml\n+<changeSet/>\n"
+        assert is_reviewable_diff(diff)
 
     def test_skip_files_by_name(self):
         for name in ["gradlew", "mvnw"]:

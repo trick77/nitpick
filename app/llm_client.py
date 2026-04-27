@@ -138,7 +138,7 @@ SKIP_EXTENSIONS = frozenset({
     ".json", ".lock", ".min.js", ".min.css", ".csv",
     ".map",
     # Build / config files
-    ".xml", ".bat", ".cmd", ".properties",
+    ".bat", ".cmd", ".properties",
 })
 
 SKIP_FILES = frozenset({"gradlew", "mvnw"})
