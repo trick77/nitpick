@@ -45,8 +45,16 @@ def _epoch_ms_to_datetime(epoch_ms: int | None) -> datetime | None:
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
 
 SEVERITY_ORDER = {"critical": 0, "important": 1}
-MAX_CUMULATIVE_CONTEXT_TOKENS = 20_000
+# Hard ceiling for the cumulative-diff context, regardless of model. Beyond this
+# the LLM tends to drown the focused review in noise.
+MAX_CUMULATIVE_CONTEXT_TOKENS = 80_000
 MAX_PREVIOUSLY_POSTED_FINDINGS = 50
+
+
+def _cumulative_diff_budget(max_tokens_per_chunk: int) -> int:
+    """Token budget for the cumulative PR diff. ~1/3 of the per-chunk budget so
+    the focused review files still fit, capped at the hard ceiling."""
+    return min(MAX_CUMULATIVE_CONTEXT_TOKENS, max(2_000, max_tokens_per_chunk // 3))
 _REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
 _JIRA_TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d{1,7})\b')
 _SECURITY_KEYWORDS = re.compile(
@@ -358,11 +366,14 @@ class Reviewer:
                     )
                     cumulative_pr_diff = ""
                 if cumulative_pr_diff:
+                    cum_budget = _cumulative_diff_budget(self.llm.max_tokens_per_chunk)
                     cum_tokens = count_tokens(cumulative_pr_diff)
-                    if cum_tokens > MAX_CUMULATIVE_CONTEXT_TOKENS:
+                    if cum_tokens > cum_budget:
                         logger.warning(
-                            "%s: cumulative PR diff %d tokens exceeds budget %d, dropping",
-                            pr_tag, cum_tokens, MAX_CUMULATIVE_CONTEXT_TOKENS,
+                            "%s: cumulative PR diff %d tokens exceeds budget %d "
+                            "(model context %s), dropping",
+                            pr_tag, cum_tokens, cum_budget,
+                            getattr(self.llm, "context_window", None),
                         )
                         cumulative_pr_diff = ""
             files, content_skipped = await self._prepare_files(
