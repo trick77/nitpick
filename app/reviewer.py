@@ -45,6 +45,8 @@ def _epoch_ms_to_datetime(epoch_ms: int | None) -> datetime | None:
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
 
 SEVERITY_ORDER = {"critical": 0, "important": 1}
+MAX_CUMULATIVE_CONTEXT_TOKENS = 20_000
+MAX_PREVIOUSLY_POSTED_FINDINGS = 50
 _REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
 _JIRA_TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d{1,7})\b')
 _SECURITY_KEYWORDS = re.compile(
@@ -308,6 +310,7 @@ class Reviewer:
             is_incremental = False
             incremental_from: str | None = None
             diff: str = ""
+            cumulative_pr_diff: str = ""
 
             if payload.eventKey == "pr:from_ref_updated" and last_reviewed and source_commit:
                 try:
@@ -339,6 +342,29 @@ class Reviewer:
                 if not diff.strip():
                     logger.info("%s has empty diff, skipping", pr_tag)
                     return
+            else:
+                # Cumulative PR diff used as cross-file context so the LLM can verify
+                # invariants split across multiple commits (e.g. entity rename in commit 1,
+                # repository method rename in commit 2). Best-effort: a failure here must
+                # not block the incremental review.
+                try:
+                    cumulative_pr_diff = await self.bitbucket.fetch_pr_diff(
+                        project_key, repo_slug, pr_id, context_lines=0
+                    )
+                except Exception:
+                    logger.warning(
+                        "%s: failed to fetch cumulative PR diff for context",
+                        pr_tag, exc_info=True,
+                    )
+                    cumulative_pr_diff = ""
+                if cumulative_pr_diff:
+                    cum_tokens = count_tokens(cumulative_pr_diff)
+                    if cum_tokens > MAX_CUMULATIVE_CONTEXT_TOKENS:
+                        logger.warning(
+                            "%s: cumulative PR diff %d tokens exceeds budget %d, dropping",
+                            pr_tag, cum_tokens, MAX_CUMULATIVE_CONTEXT_TOKENS,
+                        )
+                        cumulative_pr_diff = ""
             files, content_skipped = await self._prepare_files(
                 project_key, repo_slug, diff, source_commit, pr_tag
             )
@@ -420,6 +446,16 @@ class Reviewer:
                     )
                     logger.info("%s: linked Jira ticket %s", pr_tag, ticket_id)
 
+            # Load previously posted findings once: feed them to the LLM as
+            # "do not re-raise" context AND reuse for the post-hoc dedup below.
+            existing_findings = await _safe_db(
+                repository.get_existing_findings_for_prompt(
+                    self.db_pool, project_key, repo_slug, pr_id,
+                ),
+                fallback=[],
+            ) or []
+            findings_for_prompt = existing_findings[-MAX_PREVIOUSLY_POSTED_FINDINGS:]
+
             llm_result = await self.llm.review_diff(
                 files, repo_instructions,
                 other_modified_paths=other_modified,
@@ -428,15 +464,16 @@ class Reviewer:
                 ticket_context=ticket_context,
                 ticket_compliance_check=self.review_config.ticket_compliance_check,
                 cross_file_context=cross_file_ctx,
+                cumulative_pr_diff=cumulative_pr_diff,
+                previously_posted_findings=findings_for_prompt,
             )
 
             # Deduplicate against existing findings in DB
             original_count = len(llm_result.findings)
-            existing_keys = await _safe_db(
-                repository.get_existing_finding_keys(self.db_pool, project_key, repo_slug, pr_id),
-                fallback=set(),
-            )
-            existing_keys = existing_keys or set()
+            existing_keys = {
+                (f["file_path"], f["line_number"], f["severity"])
+                for f in existing_findings
+            }
             findings = [
                 f for f in llm_result.findings
                 if (f.file, f.line, f.severity) not in existing_keys
