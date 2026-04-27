@@ -154,9 +154,7 @@ async def get_existing_finding_keys(
 async def get_existing_findings_for_prompt(
     pool: asyncpg.Pool, project_key: str, repo_slug: str, pr_id: int
 ) -> list[dict]:
-    """Return previously posted findings on this PR, for inclusion in the review prompt
-    so the LLM does not re-raise issues already commented on (across line shifts).
-    """
+    """Return previously posted findings on this PR for inclusion in the review prompt."""
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """

@@ -12,6 +12,7 @@ from app.feedback import classify_feedback, disagree_response
 from app.llm_client import (
     LLMClient,
     FileReviewData,
+    _render_previously_posted_findings,
     count_tokens,
     extract_path,
     format_file_entry,
@@ -55,6 +56,20 @@ def _cumulative_diff_budget(max_tokens_per_chunk: int) -> int:
     """Token budget for the cumulative PR diff. ~1/3 of the per-chunk budget so
     the focused review files still fit, capped at the hard ceiling."""
     return min(MAX_CUMULATIVE_CONTEXT_TOKENS, max(2_000, max_tokens_per_chunk // 3))
+
+
+# Previously-posted findings are bounded both by count and by rendered token size:
+# count guards prompt latency, tokens guard against a few very long comments
+# inflating the prompt unboundedly.
+MAX_PREVIOUSLY_POSTED_FINDINGS_TOKENS = 4_000
+
+
+def _previously_posted_findings_budget(max_tokens_per_chunk: int) -> int:
+    return min(MAX_PREVIOUSLY_POSTED_FINDINGS_TOKENS, max(500, max_tokens_per_chunk // 20))
+
+
+def _preview_findings_block(findings: list[dict]) -> str:
+    return _render_previously_posted_findings(findings)
 _REVIEW_KEYWORDS = {"review", "review this", "re-review", "rereview"}
 _JIRA_TICKET_RE = re.compile(r'\b([A-Z]{2,10}-\d{1,7})\b')
 _SECURITY_KEYWORDS = re.compile(
@@ -465,7 +480,15 @@ class Reviewer:
                 ),
                 fallback=[],
             ) or []
+            # Tail = most recent (DB returns ORDER BY id ASC). On a long-lived PR
+            # with >MAX prior findings the oldest are dropped from the prompt but
+            # remain in `existing_keys` below, so post-hoc dedup is unaffected.
             findings_for_prompt = existing_findings[-MAX_PREVIOUSLY_POSTED_FINDINGS:]
+            findings_budget = _previously_posted_findings_budget(self.llm.max_tokens_per_chunk)
+            while findings_for_prompt and count_tokens(
+                _preview_findings_block(findings_for_prompt)
+            ) > findings_budget:
+                findings_for_prompt = findings_for_prompt[1:]
 
             llm_result = await self.llm.review_diff(
                 files, repo_instructions,

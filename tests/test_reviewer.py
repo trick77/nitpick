@@ -1821,6 +1821,29 @@ class TestIncrementalReview:
         mock_bitbucket.fetch_pr_diff.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_incremental_review_proceeds_when_cumulative_fetch_fails(
+        self, mock_bitbucket, mock_llm, monkeypatch,
+    ):
+        """If the cumulative-diff fetch raises (e.g. Bitbucket flake), the incremental
+        review still completes with cumulative_pr_diff=''."""
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="aabbccdd1234"),
+        )
+        # First call to fetch_pr_diff (the cumulative fetch in incremental mode) raises.
+        mock_bitbucket.fetch_pr_diff.side_effect = Exception("boom")
+
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        payload = _make_payload()
+        payload.eventKey = "pr:from_ref_updated"
+
+        await rev.review_pull_request(payload)
+
+        mock_llm.review_diff.assert_called_once()
+        kwargs = mock_llm.review_diff.call_args.kwargs
+        assert kwargs.get("cumulative_pr_diff", "") == ""
+
+    @pytest.mark.asyncio
     async def test_full_review_does_not_pass_cumulative_diff(self, mock_bitbucket, mock_llm, monkeypatch):
         """Full (non-incremental) reviews must not pass cumulative_pr_diff — focused diff IS the PR."""
         monkeypatch.setattr(
