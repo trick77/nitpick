@@ -233,13 +233,14 @@ def mock_bitbucket():
     return client
 
 
-def _make_review_result(findings=None, skipped_files=None, review_effort=1):
+def _make_review_result(findings=None, skipped_files=None, review_effort=1, timed_out=False):
     return LLMClient.ReviewResult(
         findings=findings or [],
         skipped_files=skipped_files or [],
         prompt_tokens=100,
         completion_tokens=50,
         review_effort=review_effort,
+        timed_out=timed_out,
     )
 
 
@@ -495,6 +496,194 @@ class TestReviewer:
         mock_llm.review_diff.assert_called_once()
         mock_bitbucket.post_inline_comment.assert_called_once()
         mock_bitbucket.post_pr_comment.assert_called_once()
+
+
+class TestReviewTimeoutHandling:
+    """When llm_result.timed_out is True the normal summary path is replaced
+    by either a fresh "Review skipped" notice (no prior summary) or a
+    staleness banner prepended to the existing summary."""
+
+    @pytest.mark.asyncio
+    async def test_no_inline_comments_or_stats_when_timed_out(
+        self, mock_bitbucket, mock_llm, monkeypatch,
+    ):
+        mock_llm.review_diff.return_value = _make_review_result([], timed_out=True)
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.upsert_pr_review",
+            AsyncMock(return_value=99),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_summary_comment_info",
+            AsyncMock(return_value=None),
+        )
+        update_summary_comment = AsyncMock()
+        monkeypatch.setattr(
+            "app.reviewer.repository.update_summary_comment",
+            update_summary_comment,
+        )
+        insert_review_stats = AsyncMock()
+        monkeypatch.setattr(
+            "app.reviewer.repository.insert_review_stats",
+            insert_review_stats,
+        )
+
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        await rev.review_pull_request(_make_payload("username"))
+
+        mock_bitbucket.post_inline_comment.assert_not_called()
+        insert_review_stats.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_first_ever_timeout_posts_review_skipped_notice(
+        self, mock_bitbucket, mock_llm, monkeypatch,
+    ):
+        mock_llm.review_diff.return_value = _make_review_result([], timed_out=True)
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value=None),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.upsert_pr_review",
+            AsyncMock(return_value=99),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_summary_comment_info",
+            AsyncMock(return_value=None),
+        )
+        update_summary_comment = AsyncMock()
+        monkeypatch.setattr(
+            "app.reviewer.repository.update_summary_comment",
+            update_summary_comment,
+        )
+
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        await rev.review_pull_request(_make_payload("username"))
+
+        mock_bitbucket.post_pr_comment.assert_called_once()
+        body = mock_bitbucket.post_pr_comment.call_args[0][3]
+        assert "Review skipped" in body
+        assert "no response from the model within" in body
+        assert "minutes" in body
+        # Stored so the next successful review updates this same comment.
+        update_summary_comment.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_prior_summary_prepends_staleness_banner(
+        self, mock_bitbucket, mock_llm, monkeypatch,
+    ):
+        from app.reviewer import _STALE_BANNER_SENTINEL
+        mock_llm.review_diff.return_value = _make_review_result([], timed_out=True)
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="oldcommit1234567"),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.upsert_pr_review",
+            AsyncMock(return_value=99),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_summary_comment_info",
+            AsyncMock(return_value={
+                "summary_comment_id": 555,
+                "summary_comment_version": 3,
+            }),
+        )
+        update_summary_comment = AsyncMock()
+        monkeypatch.setattr(
+            "app.reviewer.repository.update_summary_comment",
+            update_summary_comment,
+        )
+
+        original_body = "### Review summary\n- 1 issue ❌\n\n(prior content)"
+        mock_bitbucket.fetch_pr_comment = AsyncMock(return_value={
+            "text": original_body,
+            "version": 3,
+        })
+        mock_bitbucket.update_pr_comment = AsyncMock(return_value=4)
+
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        await rev.review_pull_request(_make_payload("username"))
+
+        # Did NOT post a new comment.
+        mock_bitbucket.post_pr_comment.assert_not_called()
+        # DID update the existing one with banner + original body.
+        mock_bitbucket.update_pr_comment.assert_called_once()
+        new_body = mock_bitbucket.update_pr_comment.call_args[0][5]
+        assert new_body.startswith(_STALE_BANNER_SENTINEL)
+        assert "oldcommi" in new_body  # short sha of prior commit
+        assert original_body in new_body
+        update_summary_comment.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_repeated_timeout_does_not_stack_banners(
+        self, mock_bitbucket, mock_llm, monkeypatch,
+    ):
+        from app.reviewer import _STALE_BANNER_SENTINEL
+        mock_llm.review_diff.return_value = _make_review_result([], timed_out=True)
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_last_reviewed_commit",
+            AsyncMock(return_value="oldcommit1234567"),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.upsert_pr_review",
+            AsyncMock(return_value=99),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.get_summary_comment_info",
+            AsyncMock(return_value={
+                "summary_comment_id": 555,
+                "summary_comment_version": 3,
+            }),
+        )
+        monkeypatch.setattr(
+            "app.reviewer.repository.update_summary_comment",
+            AsyncMock(),
+        )
+        already_bannered = (
+            f"{_STALE_BANNER_SENTINEL}\n"
+            "⚠️ No response from the model within 3 minutes on commit `oldfailed` "
+            "— findings below reflect the earlier commit `oldcommi`.\n\n"
+            "### Review summary\n- 1 issue ❌"
+        )
+        mock_bitbucket.fetch_pr_comment = AsyncMock(return_value={
+            "text": already_bannered,
+            "version": 3,
+        })
+        mock_bitbucket.update_pr_comment = AsyncMock(return_value=4)
+
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        await rev.review_pull_request(_make_payload("username"))
+
+        new_body = mock_bitbucket.update_pr_comment.call_args[0][5]
+        # Exactly one sentinel marker — the prior banner was stripped.
+        assert new_body.count(_STALE_BANNER_SENTINEL) == 1
+        # Original review summary content survived.
+        assert "### Review summary" in new_body
+        assert "1 issue" in new_body
+
+
+class TestStripStaleBanner:
+    def test_no_banner_returns_unchanged(self):
+        from app.reviewer import _strip_stale_banner
+        body = "### Review summary\n- 0 issues ✅"
+        assert _strip_stale_banner(body) == body
+
+    def test_strips_banner_block(self):
+        from app.reviewer import _strip_stale_banner, _STALE_BANNER_SENTINEL
+        body = (
+            f"{_STALE_BANNER_SENTINEL}\n"
+            "⚠️ No response from the model within 3 minutes on commit `abc12345` "
+            "— findings below reflect the earlier commit `def67890`.\n"
+            "\n"
+            "### Review summary\n- 1 issue ❌"
+        )
+        result = _strip_stale_banner(body)
+        assert _STALE_BANNER_SENTINEL not in result
+        assert result.startswith("### Review summary")
 
 
 class TestSortAndLimit:
@@ -1024,6 +1213,28 @@ class TestHandleMention:
         # Should trigger review_diff, not answer_question
         mock_llm.review_diff.assert_called_once()
         mock_llm.answer_question.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_mention_timeout_replies_with_timeout_message(
+        self, mock_bitbucket, mock_llm,
+    ):
+        import openai
+        import httpx as _httpx
+        mock_llm.answer_question = AsyncMock(
+            side_effect=openai.APITimeoutError(
+                request=_httpx.Request("POST", "https://x"),
+            ),
+        )
+        mock_bitbucket.reply_to_comment = AsyncMock()
+
+        rev = Reviewer(mock_bitbucket, mock_llm, _review_config(), db_pool=AsyncMock())
+        payload = _make_mention_payload("@noergler what does this do?")
+        await rev.handle_mention(payload)
+
+        mock_bitbucket.reply_to_comment.assert_called_once()
+        reply_text = mock_bitbucket.reply_to_comment.call_args[0][4]
+        assert "No response from the model within" in reply_text
+        assert "minutes" in reply_text
 
 
 class TestMaxFileLines:

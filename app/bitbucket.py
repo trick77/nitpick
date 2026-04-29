@@ -133,6 +133,18 @@ class BitbucketClient:
         response.raise_for_status()
         logger.info("Replied to comment %d on PR %d", parent_comment_id, pr_id)
 
+    async def fetch_pr_comment(
+        self, project: str, repo: str, pr_id: int, comment_id: int,
+    ) -> dict:
+        """Fetch a single PR comment. Returns the raw payload (text, version, ...)."""
+        url = (
+            f"/rest/api/1.0/projects/{project}/repos/{repo}"
+            f"/pull-requests/{pr_id}/comments/{comment_id}"
+        )
+        response = await self.client.get(url)
+        response.raise_for_status()
+        return response.json()
+
     async def update_pr_comment(
         self, project: str, repo: str, pr_id: int,
         comment_id: int, version: int, text: str,
