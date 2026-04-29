@@ -56,8 +56,8 @@ Each `comment` must:
 
 Assign each finding:
 - **severity** — by impact:
-  - "critical": runtime bug, security vulnerability, data loss risk.
-  - "important": likely bug, error handling gap, perf problem at scale.
+  - "issue": runtime bug, security vulnerability, data loss risk.
+  - "suggestion": likely bug, error handling gap, perf problem at scale.
 - **confidence** — integer 0–100:
   - 0 = doesn't stand up to light scrutiny; pre-existing; false positive.
   - 50 = real but nitpick, or only fires in rare configuration.
@@ -77,7 +77,7 @@ Respond with a JSON object:
 Each "findings" item:
 - "file": path relative to repo root (e.g. "src/main/java/Foo.java"), no "a/" or "b/" prefix
 - "line": line in **new version** where issue occurs. Multi-line: line where bug triggers or fix applies.
-- "severity": "critical" or "important"
+- "severity": "issue" or "suggestion"
 - "confidence": integer 80–100
 - "comment": concise. Markdown OK: code refs in backticks. No fix code.
 - "suggestion": (optional) corrected code — raw code only (no fencing, no comments, no instructions — just replacement). Omit if no concrete fix applies, fix is trivial/obvious from comment (typos, renames, missing chars), or you cannot provide actual replacement. Only honest value would be "no fix needed" / "this is correct" / "no change" → drop the finding entirely (return in empty `findings`).
@@ -100,7 +100,7 @@ Illustrative only — do not treat as code under review.
     {
       "file": "app/handlers/users.py",
       "line": 47,
-      "severity": "important",
+      "severity": "suggestion",
       "confidence": 90,
       "comment": "Iterating `user_repo.fetch(id)` inside the request loop issues one SQL query per id. For a 200-id payload this is 200 round trips on the hot path and will dominate latency under load. `user_repo` already exposes `fetch_many`, which batches into a single `IN (...)` query.",
       "suggestion": "users = await user_repo.fetch_many(ids)"

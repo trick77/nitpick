@@ -74,7 +74,7 @@ _REVIEW_RESPONSE_SCHEMA: dict = {
                 "properties": {
                     "file": {"type": "string"},
                     "line": {"type": "integer"},
-                    "severity": {"type": "string", "enum": ["critical", "important"]},
+                    "severity": {"type": "string", "enum": ["issue", "suggestion"]},
                     "confidence": {"type": "integer", "minimum": 80, "maximum": 100},
                     "comment": {"type": "string"},
                     "suggestion": {"type": ["string", "null"]},
@@ -283,7 +283,29 @@ def _merge_change_summaries(parts: list[list[str]]) -> list[str]:
     return merged
 
 
-def _parse_review_response(content: str) -> tuple[list[ReviewFinding], list[dict], list[str]]:
+def _combine_compliance(
+    a: list[dict] | None, b: list[dict] | None,
+) -> list[dict] | None:
+    """Merge compliance results across bisected chunks.
+
+    None means extraction failed for that branch. Prefer any successful
+    parse over a failure, and any non-empty list over an empty one.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a if a else b
+
+
+def _parse_review_response(content: str) -> tuple[list[ReviewFinding], list[dict] | None, list[str]]:
+    """Parse the LLM review response.
+
+    Returns ``compliance_requirements=None`` when the response could not be
+    parsed at all (JSON decode error or unexpected top-level type) — distinct
+    from an empty list, which means the model legitimately returned no
+    requirements.
+    """
     content = content.strip()
     if content.startswith("```"):
         lines = content.splitlines()
@@ -296,7 +318,7 @@ def _parse_review_response(content: str) -> tuple[list[ReviewFinding], list[dict
         data = json.loads(content)
     except json.JSONDecodeError:
         logger.error("Failed to parse review response as JSON: %s", content[:200])
-        return [], [], []
+        return [], None, []
 
     compliance_requirements: list[dict] = []
     change_summary: list[str] = []
@@ -320,7 +342,7 @@ def _parse_review_response(content: str) -> tuple[list[ReviewFinding], list[dict
             logger.warning("change_summary empty after parse")
     elif not isinstance(data, list):
         logger.error("Review response is not a JSON array or object")
-        return [], [], []
+        return [], None, []
 
     findings = []
     for item in findings_data:
@@ -454,7 +476,7 @@ def render_previously_posted_findings(findings: list[dict] | None) -> str:
     for f in findings:
         path = f.get("file_path") or "<unknown>"
         line = f.get("line_number")
-        sev = f.get("severity") or "important"
+        sev = f.get("severity") or "suggestion"
         text = (f.get("comment_text") or "").strip().replace("\n", " ")
         if len(text) > 300:
             text = text[:297] + "..."
@@ -603,6 +625,11 @@ class LLMClient:
         compliance_requirements: list[dict] = field(default_factory=list)
         change_summary: list[str] = field(default_factory=list)
         chunk_count: int = 1
+        # True when at least one chunk failed to return a parseable response
+        # AND no chunk produced any compliance requirements — signals that the
+        # absence of compliance data is due to an LLM error, not "no
+        # code-relevant requirements".
+        compliance_extraction_failed: bool = False
 
     async def review_diff(
         self,
@@ -659,6 +686,7 @@ class LLMClient:
         total_prompt_tokens = 0
         total_completion_tokens = 0
         compliance_requirements: list[dict] = []
+        any_chunk_extraction_failed = False
         chunk_summaries: list[list[str]] = []
         for i, group in enumerate(groups):
             logger.info("Reviewing chunk %d/%d (%d file%s)",
@@ -671,7 +699,9 @@ class LLMClient:
             skipped_files.extend(skipped)
             total_prompt_tokens += prompt_tokens
             total_completion_tokens += completion_tokens
-            if chunk_requirements and not compliance_requirements:
+            if chunk_requirements is None:
+                any_chunk_extraction_failed = True
+            elif chunk_requirements and not compliance_requirements:
                 compliance_requirements = chunk_requirements
             if chunk_summary:
                 chunk_summaries.append(chunk_summary)
@@ -700,6 +730,9 @@ class LLMClient:
             compliance_requirements=compliance_requirements,
             change_summary=change_summary,
             chunk_count=len(groups),
+            compliance_extraction_failed=(
+                any_chunk_extraction_failed and not compliance_requirements
+            ),
         )
 
     @staticmethod
@@ -847,7 +880,7 @@ class LLMClient:
         depth: int,
         max_depth: int = 3,
         supplementary: str = "",
-    ) -> tuple[list[ReviewFinding], int, int, list[str], list[dict], list[str]]:
+    ) -> tuple[list[ReviewFinding], int, int, list[str], list[dict] | None, list[str]]:
         rendered = _render_file_group(group)
         if supplementary and depth == 0:
             rendered = rendered + "\n\n" + supplementary
@@ -861,7 +894,7 @@ class LLMClient:
                 "Timeout reviewing %d file(s) — skipping: %s (%s)",
                 len(group), ", ".join(paths), type(exc).__name__,
             )
-            return [], 0, 0, paths, [], []
+            return [], 0, 0, paths, None, []
         except openai.APIStatusError as exc:
             if exc.status_code != 413:
                 raise
@@ -889,7 +922,7 @@ class LLMClient:
                     file.diff.count("\n") + 1 if file else 0,
                     count_tokens(prompt),
                 )
-                return [], 0, 0, [path], [], []
+                return [], 0, 0, [path], None, []
             if depth >= max_depth:
                 paths = [f.path for f in group]
                 for f in group:
@@ -897,7 +930,7 @@ class LLMClient:
                         "413 — file will not be reviewed after %d bisections: %s (%d diff lines)",
                         depth, f.path, f.diff.count("\n") + 1,
                     )
-                return [], 0, 0, paths, [], []
+                return [], 0, 0, paths, None, []
             mid = len(group) // 2
             logger.info(
                 "413 with %d files — splitting chunk and retrying (depth %d)",
@@ -905,7 +938,7 @@ class LLMClient:
             )
             left = await self._review_file_group(group[:mid], template, depth + 1, max_depth)
             right = await self._review_file_group(group[mid:], template, depth + 1, max_depth)
-            compliance = left[4] if left[4] else right[4]
+            compliance = _combine_compliance(left[4], right[4])
             change_summary = _merge_change_summaries([left[5], right[5]])
             return (
                 left[0] + right[0],
@@ -916,7 +949,7 @@ class LLMClient:
                 change_summary,
             )
 
-    async def _call_api(self, prompt: str) -> tuple[list[ReviewFinding], int, int, list[dict], list[str]]:
+    async def _call_api(self, prompt: str) -> tuple[list[ReviewFinding], int, int, list[dict] | None, list[str]]:
         system = (
             "You are a read-only code review assistant. You analyse code and may suggest fixes with code examples, "
             "but never produce full patches, diffs to apply, or act as an agent that modifies repository content. "

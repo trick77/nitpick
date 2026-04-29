@@ -280,7 +280,7 @@ The model responds with JSON containing:
     {
       "file": "service.py",
       "line": 42,
-      "severity": "critical",
+      "severity": "issue",
       "confidence": 95,
       "comment": "Description of the issue",
       "suggestion": "corrected code (optional)"
@@ -297,8 +297,8 @@ The model responds with JSON containing:
 ```
 
 Only findings with confidence >= 80 are included. Severity levels:
-- **critical** (90-100): Runtime bugs, security vulnerabilities, data loss risks
-- **warning** (80-89): Likely bugs, error handling gaps, performance issues
+- **issue** (90-100): Runtime bugs, security vulnerabilities, data loss risks
+- **suggestion** (80-89): Likely bugs, error handling gaps, performance issues
 
 ## 10. Post-processing and posting
 
@@ -310,7 +310,7 @@ Before posting, findings are checked against existing noergler comments on the P
 
 ### Sorting and limiting
 
-Findings are sorted by severity (critical first), then capped at `REVIEW_MAX_COMMENTS` (default 25).
+Findings are sorted by severity (issues first), then capped at `REVIEW_MAX_COMMENTS` (default 25).
 
 ### Inline comments
 
@@ -335,7 +335,7 @@ A summary comment is posted (or updated if one already exists) containing:
 **Example inline comment:**
 
 ```
-🔴 **Critical** — `service.py:42`
+🔴 **Issue** — `service.py:42`
 
 `user_id` can be `None` when called from the batch endpoint, causing an
 unhandled `TypeError` on the database query.
@@ -351,8 +351,8 @@ if not user_id:
 
 ```
 ### Review summary
-- 1 critical ❌
-- 2 warnings ⚠️
+- 1 issue ❌
+- 2 suggestions ⚠️
 
 ### What changed
 - Added user deletion endpoint with soft-delete flag

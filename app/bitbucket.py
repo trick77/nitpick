@@ -9,7 +9,6 @@ from app.models import ReviewFinding
 
 logger = logging.getLogger(__name__)
 
-_SEVERITY_LABEL = {"critical": "Issue", "important": "Suggestion"}
 
 
 class BitbucketClient:
@@ -82,8 +81,8 @@ class BitbucketClient:
     ) -> int | None:
         url = f"/rest/api/1.0/projects/{project}/repos/{repo}/pull-requests/{pr_id}/comments"
         path = re.sub(r"^[ab]/", "", finding.file)
-        label = _SEVERITY_LABEL.get(finding.severity, "Issue")
-        parts = [f"**{label}.** {finding.comment}"]
+        label = finding.severity.capitalize()
+        parts = [f"**{label}:** {finding.comment}"]
         if finding.suggestion:
             parts.append(f"**Suggested change:**\n```\n{finding.suggestion}\n```")
         parts.append("_Wrong finding? Reply \"disagree\" if this comment is incorrect or hallucinated._")

@@ -46,7 +46,7 @@ def _epoch_ms_to_datetime(epoch_ms: int | None) -> datetime | None:
         return None
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
 
-SEVERITY_ORDER = {"critical": 0, "important": 1}
+SEVERITY_ORDER = {"issue": 0, "suggestion": 1}
 
 CLEAN_REVIEW_MESSAGES = (
     "No issues found ✅",
@@ -613,6 +613,7 @@ class Reviewer:
                 ticket=ticket,
                 parent_ticket=parent_ticket,
                 compliance_requirements=llm_result.compliance_requirements,
+                compliance_extraction_failed=llm_result.compliance_extraction_failed,
                 elapsed=elapsed,
                 jira_enabled=self.jira is not None,
                 ticket_compliance_check=self.review_config.ticket_compliance_check,
@@ -634,7 +635,7 @@ class Reviewer:
             )
 
             # Persist review statistics
-            counts = {"critical": 0, "important": 0}
+            counts = {"issue": 0, "suggestion": 0}
             for f in findings:
                 counts[f.severity] = counts.get(f.severity, 0) + 1
             security_count = len([f for f in findings if _SECURITY_KEYWORDS.search(f.comment)])
@@ -651,8 +652,8 @@ class Reviewer:
                     diff_removed=diff_removed,
                     files_reviewed=len(files),
                     total_files=total_files + len(deleted_paths) + len(renamed_paths),
-                    critical_count=counts.get("critical", 0),
-                    important_count=counts.get("important", 0),
+                    issue_count=counts.get("issue", 0),
+                    suggestion_count=counts.get("suggestion", 0),
                     security_count=security_count,
                     review_effort=llm_result.review_effort,
                     prompt_tokens=llm_result.prompt_tokens,
@@ -1053,6 +1054,7 @@ class Reviewer:
         ticket: JiraTicket | None = None,
         parent_ticket: JiraTicket | None = None,
         compliance_requirements: list[dict] | None = None,
+        compliance_extraction_failed: bool = False,
         elapsed: float | None = None,
         jira_enabled: bool = False,
         ticket_compliance_check: bool = True,
@@ -1100,9 +1102,9 @@ class Reviewer:
                 summary_lines.append("")
                 summary_lines.append("**Top findings:**")
                 for f in top:
-                    label = "Issue" if f.severity == "critical" else "Suggestion"
+                    label = f.severity.capitalize()
                     first_line = f.comment.splitlines()[0].strip() if f.comment else ""
-                    summary_lines.append(f"- **{label}.** {first_line}")
+                    summary_lines.append(f"- **{label}:** {first_line}")
                 if len(findings) > top_limit:
                     summary_lines.append(f"- …and {len(findings) - top_limit} more")
 
@@ -1144,6 +1146,18 @@ class Reviewer:
                 for r in reqs:
                     mark = "✅" if r.get("met") else "❌"
                     ticket_lines.append(f"- {r.get('requirement', '???')} {mark}")
+            else:
+                # Make the reason for missing compliance data explicit so
+                # reviewers can tell config/ticket/LLM problems apart.
+                if not ticket_compliance_check:
+                    reason = "_Compliance check disabled in config_"
+                elif compliance_extraction_failed:
+                    reason = "_Compliance extraction failed during LLM review — check logs_"
+                elif not ticket.acceptance_criteria:
+                    reason = "_No acceptance criteria found in ticket_"
+                else:
+                    reason = "_No acceptance criteria are verifiable from code changes_"
+                ticket_lines.append(reason)
             sections.append("\n".join(ticket_lines))
 
         # --- What changed (after compliance: findings/verdict are the news; this is context)
