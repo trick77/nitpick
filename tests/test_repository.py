@@ -170,7 +170,7 @@ async def test_insert_finding_executes_insert():
         pr_review_id=1,
         file_path="src/foo.py",
         line_number=10,
-        severity="important",
+        severity="suggestion",
         comment_text="Fix this",
         suggestion=None,
         bitbucket_comment_id=77,
@@ -189,14 +189,14 @@ async def test_insert_finding_executes_insert():
 @pytest.mark.asyncio
 async def test_get_existing_finding_keys_returns_set():
     fake_rows = [
-        {"file_path": "a.py", "line_number": 1, "severity": "important"},
-        {"file_path": "b.py", "line_number": 2, "severity": "critical"},
+        {"file_path": "a.py", "line_number": 1, "severity": "suggestion"},
+        {"file_path": "b.py", "line_number": 2, "severity": "issue"},
     ]
     pool = _make_pool(fetch_return=fake_rows)
 
     result = await repository.get_existing_finding_keys(pool, "PROJ", "my-repo", 42)
 
-    assert result == {("a.py", 1, "important"), ("b.py", 2, "critical")}
+    assert result == {("a.py", 1, "suggestion"), ("b.py", 2, "issue")}
 
 
 @pytest.mark.asyncio
@@ -210,12 +210,12 @@ async def test_get_existing_finding_keys_empty():
 
 @pytest.mark.asyncio
 async def test_get_finding_by_comment_id_returns_dict():
-    fake_row = {"file_path": "foo.py", "line_number": 5, "severity": "critical"}
+    fake_row = {"file_path": "foo.py", "line_number": 5, "severity": "issue"}
     pool = _make_pool(fetchrow_return=fake_row)
 
     result = await repository.get_finding_by_comment_id(pool, 77)
 
-    assert result == {"file_path": "foo.py", "line_number": 5, "severity": "critical"}
+    assert result == {"file_path": "foo.py", "line_number": 5, "severity": "issue"}
 
 
 @pytest.mark.asyncio
@@ -243,8 +243,8 @@ async def test_insert_review_stats_executes_insert_with_correct_param_count():
         diff_removed=5,
         files_reviewed=3,
         total_files=4,
-        critical_count=1,
-        important_count=2,
+        issue_count=1,
+        suggestion_count=2,
         security_count=0,
         review_effort=15,
         prompt_tokens=1000,
@@ -281,7 +281,7 @@ async def test_insert_feedback_executes_insert():
         feedback_author="bob",
         classification="disagree",
         file_path="foo.py",
-        severity="important",
+        severity="suggestion",
     )
 
     pool._conn.execute.assert_awaited_once()

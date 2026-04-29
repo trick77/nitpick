@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -59,7 +61,7 @@ class WebhookPayload(BaseModel):
 class ReviewFinding(BaseModel):
     file: str
     line: int
-    severity: str  # "critical", "important"
+    severity: Literal["issue", "suggestion"]
     confidence: int | None = None
     comment: str
     suggestion: str | None = None

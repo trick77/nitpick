@@ -72,13 +72,13 @@ def _user_text_from_responses_call(mock_create) -> str:
 class TestParseReviewResponse:
     def test_valid_json_array(self):
         content = json.dumps([
-            {"file": "src/main.py", "line": 10, "severity": "critical", "comment": "Bug here"}
+            {"file": "src/main.py", "line": 10, "severity": "issue", "comment": "Bug here"}
         ])
         findings, requirements, change_summary = _parse_review_response(content)
         assert len(findings) == 1
         assert findings[0].file == "src/main.py"
         assert findings[0].line == 10
-        assert findings[0].severity == "critical"
+        assert findings[0].severity == "issue"
         assert requirements == []
         assert change_summary == []
 
@@ -89,14 +89,22 @@ class TestParseReviewResponse:
         assert change_summary == []
 
     def test_wrapped_in_code_fence(self):
-        content = "```json\n[{\"file\": \"a.py\", \"line\": 1, \"severity\": \"warning\", \"comment\": \"test\"}]\n```"
+        content = "```json\n[{\"file\": \"a.py\", \"line\": 1, \"severity\": \"suggestion\", \"comment\": \"test\"}]\n```"
         findings, _requirements, _ = _parse_review_response(content)
         assert len(findings) == 1
 
     def test_invalid_json(self):
         findings, requirements, change_summary = _parse_review_response("not json at all")
         assert findings == []
-        assert requirements == []
+        # None signals extraction failure (vs [] which means "successfully
+        # parsed, no requirements") so the reviewer can render the reason.
+        assert requirements is None
+        assert change_summary == []
+
+    def test_top_level_string_signals_extraction_failure(self):
+        findings, requirements, change_summary = _parse_review_response('"oops"')
+        assert findings == []
+        assert requirements is None
         assert change_summary == []
 
     def test_not_an_array(self):
@@ -105,16 +113,28 @@ class TestParseReviewResponse:
 
     def test_malformed_item_skipped(self):
         content = json.dumps([
-            {"file": "a.py", "line": 1, "severity": "critical", "comment": "good"},
+            {"file": "a.py", "line": 1, "severity": "issue", "comment": "good"},
             {"bad": "item"},
         ])
         findings, _requirements, _ = _parse_review_response(content)
         assert len(findings) == 1
 
+    def test_unknown_severity_rejected(self):
+        # Belt-and-braces: even if the LLM regresses past the JSON-schema enum,
+        # the Pydantic Literal blocks unexpected severities so downstream stats
+        # and label rendering can trust the value.
+        content = json.dumps([
+            {"file": "a.py", "line": 1, "severity": "critical", "comment": "stale"},
+            {"file": "b.py", "line": 2, "severity": "issue", "comment": "ok"},
+        ])
+        findings, _requirements, _ = _parse_review_response(content)
+        assert len(findings) == 1
+        assert findings[0].file == "b.py"
+
     def test_object_with_findings_and_compliance_requirements(self):
         content = json.dumps({
             "findings": [
-                {"file": "a.py", "line": 1, "severity": "important", "comment": "test"}
+                {"file": "a.py", "line": 1, "severity": "suggestion", "comment": "test"}
             ],
             "compliance_requirements": [
                 {"requirement": "Implement auth filter", "met": True},
@@ -123,6 +143,7 @@ class TestParseReviewResponse:
         })
         findings, requirements, _ = _parse_review_response(content)
         assert len(findings) == 1
+        assert requirements is not None
         assert len(requirements) == 2
         assert requirements[0] == {"requirement": "Implement auth filter", "met": True}
         assert requirements[1] == {"requirement": "Write tests", "met": False}
@@ -139,6 +160,7 @@ class TestParseReviewResponse:
         })
         findings, requirements, _ = _parse_review_response(content)
         assert findings == []
+        assert requirements is not None
         assert len(requirements) == 1
         assert requirements[0]["requirement"] == "Valid"
 
@@ -169,7 +191,7 @@ class TestParseReviewResponse:
             {
                 "file": "a.py",
                 "line": 10,
-                "severity": "critical",
+                "severity": "issue",
                 "comment": "You finally provide useful context for error analysis.",
                 "suggestion": "No fix needed—this code is actually correct for once.",
             }
@@ -182,7 +204,7 @@ class TestParseReviewResponse:
             {
                 "file": "a.py",
                 "line": 10,
-                "severity": "critical",
+                "severity": "issue",
                 "comment": "Null pointer dereference",
                 "suggestion": "if user is None:\n    return None\nreturn user.name",
             }
@@ -194,7 +216,7 @@ class TestParseReviewResponse:
     def test_change_summary_missing_defaults_to_empty(self):
         content = json.dumps({
             "findings": [
-                {"file": "a.py", "line": 1, "severity": "important", "comment": "test"}
+                {"file": "a.py", "line": 1, "severity": "suggestion", "comment": "test"}
             ],
         })
         _, _, change_summary = _parse_review_response(content)
@@ -528,7 +550,7 @@ class TestLLMClient:
             {
                 "file": "src/main.py",
                 "line": 5,
-                "severity": "important",
+                "severity": "suggestion",
                 "comment": "Unused variable",
             }
         ])
@@ -545,7 +567,7 @@ class TestLLMClient:
             )]
             result = await client.review_diff(files)
             assert len(result.findings) == 1
-            assert result.findings[0].severity == "important"
+            assert result.findings[0].severity == "suggestion"
             assert result.review_effort == 1  # trivial: 1 file, 1 changed line
             assert result.chunk_count == 1
         finally:
@@ -764,7 +786,7 @@ class TestCumulativeDiffAndPostedFindingsInPrompt:
         try:
             files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
             findings = [
-                {"file_path": "src/Foo.java", "line_number": 11, "severity": "critical",
+                {"file_path": "src/Foo.java", "line_number": 11, "severity": "issue",
                  "comment_text": "PropertyReferenceException risk"},
             ]
             await client.review_diff(files, previously_posted_findings=findings)
@@ -969,8 +991,8 @@ class TestReviewFileGroup413Retry:
         ]
 
         call_count = 0
-        finding_a = {"file": "a.py", "line": 1, "severity": "important", "comment": "ok"}
-        finding_d = {"file": "d.py", "line": 1, "severity": "important", "comment": "ok"}
+        finding_a = {"file": "a.py", "line": 1, "severity": "suggestion", "comment": "ok"}
+        finding_d = {"file": "d.py", "line": 1, "severity": "suggestion", "comment": "ok"}
 
         async def mock_call_api(prompt: str):
             nonlocal call_count

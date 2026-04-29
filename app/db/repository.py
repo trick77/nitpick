@@ -246,8 +246,8 @@ async def insert_review_stats(
     diff_removed: int,
     files_reviewed: int,
     total_files: int,
-    critical_count: int,
-    important_count: int,
+    issue_count: int,
+    suggestion_count: int,
     security_count: int,
     review_effort: int | None,
     prompt_tokens: int,
@@ -266,7 +266,7 @@ async def insert_review_stats(
             INSERT INTO review_statistics (
                 project_key, repo_slug, pr_id, author, is_incremental, reviewed_commit,
                 diff_added, diff_removed, files_reviewed, total_files,
-                critical_count, important_count, security_count, review_effort,
+                issue_count, suggestion_count, security_count, review_effort,
                 prompt_tokens, completion_tokens, model_name, elapsed_seconds,
                 cross_file_deps, skipped_files, content_skipped,
                 findings_posted, findings_deduplicated
@@ -281,7 +281,7 @@ async def insert_review_stats(
             """,
             project_key, repo_slug, pr_id, author, is_incremental, reviewed_commit,
             diff_added, diff_removed, files_reviewed, total_files,
-            critical_count, important_count, security_count, review_effort,
+            issue_count, suggestion_count, security_count, review_effort,
             prompt_tokens, completion_tokens, model_name, elapsed_seconds,
             cross_file_deps, skipped_files, content_skipped,
             findings_posted, findings_deduplicated,

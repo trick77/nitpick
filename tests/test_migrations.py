@@ -7,14 +7,15 @@ from alembic.script import ScriptDirectory
 _VERSIONS = Path("alembic/versions")
 _M002 = _VERSIONS / "002_metrics_and_lifecycle.py"
 _M003 = _VERSIONS / "003_pr_cost.py"
+_M004 = _VERSIONS / "004_rename_severity.py"
 
 
-def test_migration_chain_is_linear_and_reaches_003():
+def test_migration_chain_is_linear_and_reaches_004():
     script = ScriptDirectory.from_config(Config("alembic.ini"))
     revs = [(r.revision, r.down_revision) for r in script.walk_revisions()]
     chain = [r for r, _ in revs]
-    assert chain == ["003", "002", "001"]
-    assert dict(revs) == {"003": "002", "002": "001", "001": None}
+    assert chain == ["004", "003", "002", "001"]
+    assert dict(revs) == {"004": "003", "003": "002", "002": "001", "001": None}
 
 
 def test_003_adds_cost_columns_with_numeric_type():
@@ -102,3 +103,26 @@ def test_002_backfills_warning_severity_to_important():
     assert "UPDATE review_findings SET severity = 'important' WHERE severity = 'warning'" in text
     # downgrade restores them
     assert "UPDATE review_findings SET severity = 'warning' WHERE severity = 'important'" in text
+
+
+def test_004_renames_severity_columns():
+    text = _M004.read_text()
+    assert "RENAME COLUMN critical_count TO issue_count" in text
+    assert "RENAME COLUMN important_count TO suggestion_count" in text
+    # downgrade reverses both
+    assert "RENAME COLUMN suggestion_count TO important_count" in text
+    assert "RENAME COLUMN issue_count TO critical_count" in text
+
+
+def test_004_backfills_severity_values():
+    """Existing 'critical'/'important' rows must be normalized to the new vocabulary."""
+    text = _M004.read_text()
+    assert "UPDATE review_findings SET severity = 'issue' WHERE severity = 'critical'" in text
+    assert "UPDATE review_findings SET severity = 'suggestion' WHERE severity = 'important'" in text
+    assert "UPDATE feedback_events SET severity = 'issue' WHERE severity = 'critical'" in text
+    assert "UPDATE feedback_events SET severity = 'suggestion' WHERE severity = 'important'" in text
+    # downgrade restores all four
+    assert "UPDATE review_findings SET severity = 'critical' WHERE severity = 'issue'" in text
+    assert "UPDATE review_findings SET severity = 'important' WHERE severity = 'suggestion'" in text
+    assert "UPDATE feedback_events SET severity = 'critical' WHERE severity = 'issue'" in text
+    assert "UPDATE feedback_events SET severity = 'important' WHERE severity = 'suggestion'" in text

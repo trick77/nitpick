@@ -252,7 +252,7 @@ def mock_llm():
     client.context_window = 1_000_000
     client.prompt_template = "Review these files:\n{files}\n{repo_instructions}"
     client.review_diff = AsyncMock(return_value=_make_review_result([
-        ReviewFinding(file="file.py", line=1, severity="important", comment="Test issue"),
+        ReviewFinding(file="file.py", line=1, severity="suggestion", comment="Test issue"),
     ]))
     return client
 
@@ -283,7 +283,7 @@ class TestReviewer:
 
         summary_text = mock_bitbucket.post_pr_comment.call_args[0][3]
         assert "### Review summary" in summary_text
-        assert "**Suggestion.**" in summary_text
+        assert "**Suggestion:**" in summary_text
 
     @pytest.mark.asyncio
     async def test_skip_disallowed_author(self, reviewer, mock_bitbucket, mock_llm):
@@ -464,14 +464,14 @@ class TestReviewer:
 
     def test_build_summary_mixed(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="critical", comment="err"),
-            ReviewFinding(file="b.py", line=2, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="issue", comment="err"),
+            ReviewFinding(file="b.py", line=2, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings)
         assert "### Review summary" in summary
         assert "**Top findings:**" in summary
-        assert "**Issue.** err" in summary
-        assert "**Suggestion.** warn" in summary
+        assert "**Issue:** err" in summary
+        assert "**Suggestion:** warn" in summary
         assert "❌" not in summary
         assert "⚠️" not in summary
 
@@ -500,7 +500,7 @@ class TestReviewer:
 class TestSortAndLimit:
     def test_findings_limited_to_max_comments(self):
         findings = [
-            ReviewFinding(file=f"f{i}.py", line=i, severity="important", comment=f"issue {i}")
+            ReviewFinding(file=f"f{i}.py", line=i, severity="suggestion", comment=f"issue {i}")
             for i in range(30)
         ]
         limited, truncated = _sort_and_limit(findings, max_comments=5)
@@ -509,7 +509,7 @@ class TestSortAndLimit:
 
     def test_no_truncation_when_under_limit(self):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="issue"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="issue"),
         ]
         limited, truncated = _sort_and_limit(findings, max_comments=25)
         assert len(limited) == 1
@@ -517,11 +517,11 @@ class TestSortAndLimit:
 
     def test_findings_sorted_by_severity(self):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
-            ReviewFinding(file="b.py", line=2, severity="critical", comment="err"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
+            ReviewFinding(file="b.py", line=2, severity="issue", comment="err"),
         ]
         sorted_findings, _ = _sort_and_limit(findings, max_comments=25)
-        assert [f.severity for f in sorted_findings] == ["critical", "important"]
+        assert [f.severity for f in sorted_findings] == ["issue", "suggestion"]
 
     @pytest.fixture
     def reviewer(self, mock_bitbucket, mock_llm):
@@ -529,8 +529,8 @@ class TestSortAndLimit:
 
     def test_build_summary_truncated(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="critical", comment="err"),
-            ReviewFinding(file="b.py", line=2, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="issue", comment="err"),
+            ReviewFinding(file="b.py", line=2, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, truncated=True)
         assert "**Top findings:**" in summary
@@ -538,13 +538,13 @@ class TestSortAndLimit:
 
     def test_build_summary_top_findings_under_limit(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=10, severity="critical", comment="Bad thing"),
-            ReviewFinding(file="b.py", line=20, severity="important", comment="Mild thing"),
+            ReviewFinding(file="a.py", line=10, severity="issue", comment="Bad thing"),
+            ReviewFinding(file="b.py", line=20, severity="suggestion", comment="Mild thing"),
         ]
         summary = reviewer._build_summary(findings)
         assert "**Top findings:**" in summary
-        assert "- **Issue.** Bad thing" in summary
-        assert "- **Suggestion.** Mild thing" in summary
+        assert "- **Issue:** Bad thing" in summary
+        assert "- **Suggestion:** Mild thing" in summary
         # File path / line number must not leak into the summary
         assert "a.py" not in summary
         assert "b.py" not in summary
@@ -552,27 +552,27 @@ class TestSortAndLimit:
 
     def test_build_summary_top_findings_over_limit(self, reviewer):
         findings = [
-            ReviewFinding(file=f"f{i}.py", line=i, severity="critical", comment=f"issue {i}")
+            ReviewFinding(file=f"f{i}.py", line=i, severity="issue", comment=f"issue {i}")
             for i in range(8)
         ]
         summary = reviewer._build_summary(findings)
         assert "**Top findings:**" in summary
         # Only first 5 rendered as one-liners
-        assert "- **Issue.** issue 0" in summary
-        assert "- **Issue.** issue 4" in summary
+        assert "- **Issue:** issue 0" in summary
+        assert "- **Issue:** issue 4" in summary
         assert "issue 5" not in summary
         assert "- …and 3 more" in summary
 
     def test_build_summary_top_findings_keeps_long_comment(self, reviewer):
         long_comment = "x" * 200
-        findings = [ReviewFinding(file="a.py", line=1, severity="critical", comment=long_comment)]
+        findings = [ReviewFinding(file="a.py", line=1, severity="issue", comment=long_comment)]
         summary = reviewer._build_summary(findings)
         # Full single-line comment must be rendered verbatim — no char truncation.
         assert long_comment in summary
 
     def test_build_summary_top_findings_first_line_only(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="critical",
+            ReviewFinding(file="a.py", line=1, severity="issue",
                           comment="First line.\nSecond line should be dropped."),
         ]
         summary = reviewer._build_summary(findings)
@@ -585,7 +585,7 @@ class TestSortAndLimit:
 
     def test_build_summary_agents_md_not_found(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, agents_md_found=False)
         assert "💡" in summary
@@ -594,7 +594,7 @@ class TestSortAndLimit:
 
     def test_build_summary_agents_md_found(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, agents_md_found=True)
         assert "✅" in summary
@@ -615,7 +615,7 @@ class TestSortAndLimit:
 
     def test_build_summary_agents_md_within_token_limit(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(
             findings,
@@ -629,7 +629,7 @@ class TestSortAndLimit:
 
     def test_build_summary_agents_md_exceeds_token_limit(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(
             findings,
@@ -643,7 +643,7 @@ class TestSortAndLimit:
 
     def test_build_summary_agents_md_no_token_breakdown(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(
             findings,
@@ -663,7 +663,7 @@ class TestSortAndLimit:
             db_pool=AsyncMock(),
         )
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(
             findings,
@@ -676,7 +676,7 @@ class TestSortAndLimit:
 
     def test_build_summary_skipped_files(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, skipped_files=["huge.py", "big.js"])
         assert "- Not reviewed (too large)" in summary
@@ -690,7 +690,7 @@ class TestSortAndLimit:
 
     def test_build_summary_token_usage(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, token_usage=(1000, 500))
         assert "Model: `gpt-5.3-codex`" in summary
@@ -700,7 +700,7 @@ class TestSortAndLimit:
 
     def test_build_summary_prompt_breakdown(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         breakdown = {"template": 500, "repo_instructions": 200, "files": 7258}
         summary = reviewer._build_summary(
@@ -714,7 +714,7 @@ class TestSortAndLimit:
 
     def test_build_summary_prompt_breakdown_without_token_usage(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         breakdown = {"template": 500, "repo_instructions": 0, "files": 7258}
         summary = reviewer._build_summary(findings, prompt_breakdown=breakdown)
@@ -751,7 +751,7 @@ class TestSortAndLimit:
     @pytest.mark.asyncio
     async def test_findings_limited_in_review(self, mock_bitbucket, mock_llm):
         mock_llm.review_diff.return_value = _make_review_result([
-            ReviewFinding(file=f"f{i}.py", line=i, severity="important", comment=f"issue {i}")
+            ReviewFinding(file=f"f{i}.py", line=i, severity="suggestion", comment=f"issue {i}")
             for i in range(30)
         ])
         rev = Reviewer(mock_bitbucket, mock_llm, _review_config(max_comments=5), db_pool=AsyncMock())
@@ -824,7 +824,7 @@ class TestSortAndLimit:
 
     def test_build_summary_effort_score_not_rendered(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings)
         assert "📊" not in summary
@@ -832,8 +832,8 @@ class TestSortAndLimit:
 
     def test_build_summary_security_section(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="critical", comment="SQL injection vulnerability found"),
-            ReviewFinding(file="b.py", line=2, severity="important", comment="unused import"),
+            ReviewFinding(file="a.py", line=1, severity="issue", comment="SQL injection vulnerability found"),
+            ReviewFinding(file="b.py", line=2, severity="suggestion", comment="unused import"),
         ]
         summary = reviewer._build_summary(findings)
         assert "1 potential security issue" in summary
@@ -841,15 +841,15 @@ class TestSortAndLimit:
 
     def test_build_summary_no_security_section(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="unused variable"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="unused variable"),
         ]
         summary = reviewer._build_summary(findings)
         assert "🔒" not in summary
 
     def test_build_summary_multiple_security_findings(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="critical", comment="SQL injection risk in query"),
-            ReviewFinding(file="b.py", line=5, severity="important", comment="XSS vulnerability in template"),
+            ReviewFinding(file="a.py", line=1, severity="issue", comment="SQL injection risk in query"),
+            ReviewFinding(file="b.py", line=5, severity="suggestion", comment="XSS vulnerability in template"),
         ]
         summary = reviewer._build_summary(findings)
         assert "2 potential security issues" in summary
@@ -870,8 +870,8 @@ class TestSortAndLimit:
     def test_build_summary_top_findings_above_what_changed(self, reviewer):
         """Findings are the news; What changed is context — findings render first."""
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="critical", comment="bug A"),
-            ReviewFinding(file="b.py", line=2, severity="important", comment="issue B"),
+            ReviewFinding(file="a.py", line=1, severity="issue", comment="bug A"),
+            ReviewFinding(file="b.py", line=2, severity="suggestion", comment="issue B"),
         ]
         summary = reviewer._build_summary(
             findings, change_summary=["Added retry logic"]
@@ -890,7 +890,7 @@ class TestSortAndLimit:
 
     def test_build_summary_no_divider_before_meta(self, reviewer):
         findings = [
-            ReviewFinding(file="a.py", line=1, severity="important", comment="warn"),
+            ReviewFinding(file="a.py", line=1, severity="suggestion", comment="warn"),
         ]
         summary = reviewer._build_summary(findings, agents_md_found=True)
         assert "\n\n---\n" not in summary
@@ -1221,6 +1221,67 @@ class TestBuildSummaryWithTicket:
         assert "No ticket found in branch name or PR title ℹ️" in summary
         assert "### Ticket" not in summary
 
+    def test_build_summary_no_compliance_reason_disabled(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria="AC: must work",
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, compliance_requirements=[],
+            ticket_compliance_check=False,
+        )
+        assert "_Compliance check disabled in config_" in summary
+
+    def test_build_summary_no_compliance_reason_extraction_failed(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria="AC: must work",
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, compliance_requirements=[],
+            compliance_extraction_failed=True,
+        )
+        assert "_Compliance extraction failed during LLM review" in summary
+
+    def test_build_summary_no_ac_outranks_extraction_failed(self, reviewer):
+        # If the ticket has no acceptance criteria, there was nothing to
+        # extract — surface that root cause instead of the LLM error.
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, compliance_requirements=[],
+            compliance_extraction_failed=True,
+        )
+        assert "_No acceptance criteria found in ticket_" in summary
+        assert "extraction failed" not in summary.lower()
+
+    def test_build_summary_no_compliance_reason_no_acceptance_criteria(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, compliance_requirements=[],
+        )
+        assert "_No acceptance criteria found in ticket_" in summary
+
+    def test_build_summary_no_compliance_reason_none_code_relevant(self, reviewer):
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria="AC: must work",
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, compliance_requirements=[],
+        )
+        assert "_No acceptance criteria are verifiable from code changes_" in summary
+
     @pytest.mark.asyncio
     async def test_fetch_ticket_context_includes_type_and_status(self, mock_bitbucket, mock_llm):
         ticket = JiraTicket(
@@ -1305,7 +1366,7 @@ class TestReviewWithJira:
         mock_jira.fetch_ticket = AsyncMock(return_value=ticket)
         result = _make_review_result(
             findings=[
-                ReviewFinding(file="file.py", line=1, severity="important", comment="Test issue"),
+                ReviewFinding(file="file.py", line=1, severity="suggestion", comment="Test issue"),
             ],
         )
         result.compliance_requirements = [
@@ -1467,7 +1528,7 @@ class TestHandleFeedback:
         import json as _json
         monkeypatch.setattr(
             "app.reviewer.repository.get_finding_by_comment_id",
-            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "critical"}),
+            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "issue"}),
         )
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
 
@@ -1490,7 +1551,7 @@ class TestHandleFeedback:
         # Second `disagree` on the same finding must not react, reply, or insert.
         monkeypatch.setattr(
             "app.reviewer.repository.get_finding_by_comment_id",
-            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "important"}),
+            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "suggestion"}),
         )
         monkeypatch.setattr(
             "app.reviewer.repository.has_negative_feedback",
@@ -1514,7 +1575,7 @@ class TestHandleFeedback:
 
         monkeypatch.setattr(
             "app.reviewer.repository.get_finding_by_comment_id",
-            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "important"}),
+            AsyncMock(return_value={"file_path": "a.py", "line_number": 5, "severity": "suggestion"}),
         )
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=False)
         mock_bitbucket.reply_to_comment = AsyncMock()
@@ -1541,7 +1602,7 @@ class TestHandleFeedback:
     async def test_logs_disagree_feedback(self, mock_bitbucket, mock_llm, caplog, monkeypatch):
         monkeypatch.setattr(
             "app.reviewer.repository.get_finding_by_comment_id",
-            AsyncMock(return_value={"file_path": "b.py", "line_number": 3, "severity": "important"}),
+            AsyncMock(return_value={"file_path": "b.py", "line_number": 3, "severity": "suggestion"}),
         )
         mock_bitbucket.add_comment_reaction = AsyncMock(return_value=True)
 
@@ -1729,7 +1790,7 @@ class TestIncrementalReview:
         client.context_window = 1_000_000
         client.prompt_template = "Review these files:\n{files}\n{repo_instructions}"
         client.review_diff = AsyncMock(return_value=_make_review_result([
-            ReviewFinding(file="new.py", line=1, severity="important", comment="Test issue"),
+            ReviewFinding(file="new.py", line=1, severity="suggestion", comment="Test issue"),
         ]))
         return client
 
@@ -1877,7 +1938,7 @@ class TestIncrementalReview:
             AsyncMock(return_value="aabbccdd1234"),
         )
         prior = [
-            {"file_path": "src/Foo.java", "line_number": 11, "severity": "critical",
+            {"file_path": "src/Foo.java", "line_number": 11, "severity": "issue",
              "comment_text": "PropertyReferenceException risk"},
         ]
         monkeypatch.setattr(
@@ -1926,7 +1987,7 @@ class TestIncrementalReview:
         monkeypatch.setattr("app.reviewer.MAX_PREVIOUSLY_POSTED_FINDINGS_TOKENS", 50)
         big_text = "x" * 280  # near the 300-char per-comment cap → ~70 tokens each
         prior = [
-            {"file_path": f"src/F{i}.java", "line_number": i, "severity": "important",
+            {"file_path": f"src/F{i}.java", "line_number": i, "severity": "suggestion",
              "comment_text": big_text}
             for i in range(20)
         ]
@@ -1959,7 +2020,7 @@ class TestIncrementalReview:
         # Force the entire findings block to be dropped from the prompt.
         monkeypatch.setattr("app.reviewer.MAX_PREVIOUSLY_POSTED_FINDINGS_TOKENS", 1)
         prior = [
-            {"file_path": "new.py", "line_number": 1, "severity": "important",
+            {"file_path": "new.py", "line_number": 1, "severity": "suggestion",
              "comment_text": "Already-posted issue"},
         ]
         monkeypatch.setattr(
