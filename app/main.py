@@ -66,6 +66,9 @@ async def lifespan(_app: FastAPI):
         oauth_token=config.llm.oauth_token,
         integration_id=config.llm.integration_id,
         editor_version=config.llm.editor_version,
+        editor_plugin_version=config.llm.editor_plugin_version,
+        user_agent=config.llm.user_agent,
+        github_api_version=config.llm.github_api_version,
     )
     # Do the first token exchange up front so auth failures surface at startup
     # and so we can honour the endpoints.api returned by the exchange.

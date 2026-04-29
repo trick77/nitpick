@@ -95,3 +95,33 @@ async def test_raises_on_malformed_response():
             await provider.get_token()
     finally:
         await provider.close()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_exchange_sends_full_identity_header_set():
+    """The token-exchange call carries the same Copilot-Chat-shaped identity
+    headers as inference. Missing headers here are a known throttling vector
+    even before the first inference fires (see opencode #20759)."""
+    route = respx.get(TOKEN_EXCHANGE_URL).mock(
+        return_value=httpx.Response(200, json=_payload()),
+    )
+    provider = CopilotTokenProvider(
+        oauth_token="gho_test",
+        integration_id="vscode-chat",
+        editor_version="vscode/1.109.2",
+        editor_plugin_version="copilot-chat/0.37.5",
+        user_agent="GitHubCopilotChat/0.37.5",
+        github_api_version="2025-10-01",
+    )
+    try:
+        await provider.get_token()
+        sent = route.calls[0].request.headers
+        assert sent["Authorization"] == "token gho_test"
+        assert sent["Editor-Version"] == "vscode/1.109.2"
+        assert sent["Editor-Plugin-Version"] == "copilot-chat/0.37.5"
+        assert sent["Copilot-Integration-Id"] == "vscode-chat"
+        assert sent["User-Agent"] == "GitHubCopilotChat/0.37.5"
+        assert sent["X-GitHub-Api-Version"] == "2025-10-01"
+    finally:
+        await provider.close()
