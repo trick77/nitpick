@@ -119,6 +119,18 @@ class TestParseReviewResponse:
         findings, _requirements, _ = _parse_review_response(content)
         assert len(findings) == 1
 
+    def test_unknown_severity_rejected(self):
+        # Belt-and-braces: even if the LLM regresses past the JSON-schema enum,
+        # the Pydantic Literal blocks unexpected severities so downstream stats
+        # and label rendering can trust the value.
+        content = json.dumps([
+            {"file": "a.py", "line": 1, "severity": "critical", "comment": "stale"},
+            {"file": "b.py", "line": 2, "severity": "issue", "comment": "ok"},
+        ])
+        findings, _requirements, _ = _parse_review_response(content)
+        assert len(findings) == 1
+        assert findings[0].file == "b.py"
+
     def test_object_with_findings_and_compliance_requirements(self):
         content = json.dumps({
             "findings": [

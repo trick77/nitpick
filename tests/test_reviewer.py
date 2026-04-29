@@ -1245,6 +1245,21 @@ class TestBuildSummaryWithTicket:
         )
         assert "_Compliance extraction failed during LLM review" in summary
 
+    def test_build_summary_no_ac_outranks_extraction_failed(self, reviewer):
+        # If the ticket has no acceptance criteria, there was nothing to
+        # extract — surface that root cause instead of the LLM error.
+        ticket = JiraTicket(
+            key="SEP-100", title="Test", description=None,
+            labels=[], acceptance_criteria=None,
+            url="https://jira.example.com/browse/SEP-100",
+        )
+        summary = reviewer._build_summary(
+            [], ticket=ticket, compliance_requirements=[],
+            compliance_extraction_failed=True,
+        )
+        assert "_No acceptance criteria found in ticket_" in summary
+        assert "extraction failed" not in summary.lower()
+
     def test_build_summary_no_compliance_reason_no_acceptance_criteria(self, reviewer):
         ticket = JiraTicket(
             key="SEP-100", title="Test", description=None,

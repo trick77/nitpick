@@ -1149,12 +1149,15 @@ class Reviewer:
             else:
                 # Make the reason for missing compliance data explicit so
                 # reviewers can tell config/ticket/LLM problems apart.
+                # Order matters: a missing AC means there was nothing to
+                # extract in the first place, so "extraction failed" would be
+                # misleading. Check ticket-side conditions before LLM-side.
                 if not ticket_compliance_check:
                     reason = "_Compliance check disabled in config_"
-                elif compliance_extraction_failed:
-                    reason = "_Compliance extraction failed during LLM review — check logs_"
                 elif not ticket.acceptance_criteria:
                     reason = "_No acceptance criteria found in ticket_"
+                elif compliance_extraction_failed:
+                    reason = "_Compliance extraction failed during LLM review — check logs_"
                 else:
                     reason = "_No acceptance criteria are verifiable from code changes_"
                 ticket_lines.append(reason)
