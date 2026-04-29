@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,6 +36,12 @@ _MODEL_CONTEXT_WINDOW: dict[str, int] = {
 # Reserved headroom for model output + prompt overhead when deriving a
 # chunk budget from the context window.
 _CONTEXT_WINDOW_HEADROOM_TOKENS = 16_000
+
+# Hard wall-clock cap on a single LLM HTTP call. We impose this; the model
+# itself is unaware of any deadline. Once exceeded, the in-flight request is
+# cancelled and an APITimeoutError is raised so existing handlers route
+# through the normal "skipped chunk" / timeout-notice paths.
+INFERENCE_HARD_TIMEOUT_SECONDS = 180.0
 
 
 def _context_window_for(model: str) -> int | None:
@@ -550,17 +558,28 @@ class LLMClient:
             request.headers["Openai-Intent"] = "conversation-edits"
             request.headers["x-initiator"] = "agent"
 
+        # httpx + SDK timeouts are aligned with INFERENCE_HARD_TIMEOUT_SECONDS
+        # so the asyncio.wait_for cap in _execute_responses_create is the
+        # decisive deadline. Two competing deadlines (e.g. SDK=120s, cap=180s)
+        # made the cap dead code and split the failure mode across two layers.
         self._http_client = httpx.AsyncClient(
-            timeout=120.0,
+            timeout=INFERENCE_HARD_TIMEOUT_SECONDS,
             event_hooks={"request": [_inject_copilot_auth]},
         )
         self.openai_client = AsyncOpenAI(
             base_url=config.api_url,
             api_key="placeholder",  # real auth injected per-request by event hook
-            max_retries=3,
-            timeout=120.0,
+            # No SDK-internal retries: silent retries previously turned a 30s
+            # stall into an 8-minute outage.
+            max_retries=0,
+            timeout=INFERENCE_HARD_TIMEOUT_SECONDS,
             http_client=self._http_client,
         )
+        # Process-wide serialization for every LLM HTTP call. Acquired in
+        # _execute_responses_create — the single chokepoint through which
+        # _chat and check_connectivity both run. Even a future caller that
+        # bypasses the review queue cannot fire concurrently.
+        self._inference_lock = asyncio.Lock()
         self.prompt_template = _load_prompt_template(
             review_config.review_prompt_template,
         )
@@ -599,7 +618,7 @@ class LLMClient:
                 "LLM inference request: %s/responses model=%s",
                 self.config.api_url.rstrip("/"), model_label(self.config.model, self.config.reasoning_effort),
             )
-            ping_response = await self.openai_client.responses.create(
+            ping_response = await self._execute_responses_create(
                 model=self.config.model,
                 input=[{"role": "user", "content": [
                     {"type": "input_text", "text": "Reply with: ok"},
@@ -630,6 +649,10 @@ class LLMClient:
         # absence of compliance data is due to an LLM error, not "no
         # code-relevant requirements".
         compliance_extraction_failed: bool = False
+        # True when at least one chunk's LLM call exceeded our wall-clock
+        # deadline. The reviewer uses this to suppress the normal summary
+        # path and post a failure notice / staleness banner instead.
+        timed_out: bool = False
 
     async def review_diff(
         self,
@@ -687,18 +710,21 @@ class LLMClient:
         total_completion_tokens = 0
         compliance_requirements: list[dict] = []
         any_chunk_extraction_failed = False
+        any_chunk_timed_out = False
         chunk_summaries: list[list[str]] = []
         for i, group in enumerate(groups):
             logger.info("Reviewing chunk %d/%d (%d file%s)",
                         i + 1, len(groups), len(group),
                         "" if len(group) == 1 else "s")
-            findings, prompt_tokens, completion_tokens, skipped, chunk_requirements, chunk_summary = await self._review_file_group(
+            findings, prompt_tokens, completion_tokens, skipped, chunk_requirements, chunk_summary, chunk_timed_out = await self._review_file_group(
                 group, template, depth=0, supplementary=supplementary,
             )
             all_findings.extend(findings)
             skipped_files.extend(skipped)
             total_prompt_tokens += prompt_tokens
             total_completion_tokens += completion_tokens
+            if chunk_timed_out:
+                any_chunk_timed_out = True
             if chunk_requirements is None:
                 any_chunk_extraction_failed = True
             elif chunk_requirements and not compliance_requirements:
@@ -733,6 +759,7 @@ class LLMClient:
             compliance_extraction_failed=(
                 any_chunk_extraction_failed and not compliance_requirements
             ),
+            timed_out=any_chunk_timed_out,
         )
 
     @staticmethod
@@ -880,21 +907,28 @@ class LLMClient:
         depth: int,
         max_depth: int = 3,
         supplementary: str = "",
-    ) -> tuple[list[ReviewFinding], int, int, list[str], list[dict] | None, list[str]]:
+    ) -> tuple[list[ReviewFinding], int, int, list[str], list[dict] | None, list[str], bool]:
+        """Review a group of files. Returns
+        (findings, prompt_tokens, completion_tokens, skipped_paths,
+        compliance_requirements_or_None, change_summary, timed_out).
+
+        `timed_out=True` signals the wall-clock deadline was exceeded for at
+        least one underlying API call (including any bisected sub-chunk).
+        """
         rendered = _render_file_group(group)
         if supplementary and depth == 0:
             rendered = rendered + "\n\n" + supplementary
         prompt = template.replace("{files}", rendered)
         try:
             findings, pt, ct, requirements, change_summary = await self._call_api(prompt)
-            return findings, pt, ct, [], requirements, change_summary
+            return findings, pt, ct, [], requirements, change_summary, False
         except openai.APITimeoutError as exc:
             paths = [f.path for f in group]
             logger.warning(
                 "Timeout reviewing %d file(s) — skipping: %s (%s)",
                 len(group), ", ".join(paths), type(exc).__name__,
             )
-            return [], 0, 0, paths, None, []
+            return [], 0, 0, paths, None, [], True
         except openai.APIStatusError as exc:
             if exc.status_code != 413:
                 raise
@@ -922,7 +956,7 @@ class LLMClient:
                     file.diff.count("\n") + 1 if file else 0,
                     count_tokens(prompt),
                 )
-                return [], 0, 0, [path], None, []
+                return [], 0, 0, [path], None, [], False
             if depth >= max_depth:
                 paths = [f.path for f in group]
                 for f in group:
@@ -930,7 +964,7 @@ class LLMClient:
                         "413 — file will not be reviewed after %d bisections: %s (%d diff lines)",
                         depth, f.path, f.diff.count("\n") + 1,
                     )
-                return [], 0, 0, paths, None, []
+                return [], 0, 0, paths, None, [], False
             mid = len(group) // 2
             logger.info(
                 "413 with %d files — splitting chunk and retrying (depth %d)",
@@ -947,6 +981,7 @@ class LLMClient:
                 left[3] + right[3],
                 compliance,
                 change_summary,
+                left[6] or right[6],
             )
 
     async def _call_api(self, prompt: str) -> tuple[list[ReviewFinding], int, int, list[dict] | None, list[str]]:
@@ -993,9 +1028,38 @@ class LLMClient:
                 "schema": response_schema,
             }}
         kwargs.update(self._reasoning_kwargs())
-        response = await self.openai_client.responses.create(**kwargs)
+        response = await self._execute_responses_create(**kwargs)
         text = response.output_text or ""
         usage = response.usage
         prompt_tokens = usage.input_tokens if usage else 0
         completion_tokens = usage.output_tokens if usage else 0
         return text, prompt_tokens, completion_tokens
+
+    async def _execute_responses_create(self, **kwargs):
+        """Single chokepoint for `openai_client.responses.create`.
+
+        Serializes every LLM HTTP call via `_inference_lock` and enforces
+        `INFERENCE_HARD_TIMEOUT_SECONDS` as a wall-clock cap. On cap-hit the
+        in-flight task is cancelled and `openai.APITimeoutError` is raised so
+        existing handlers (chunk skipping, mention failure reply) trigger.
+        """
+        wait_started = time.monotonic()
+        async with self._inference_lock:
+            wait_elapsed = time.monotonic() - wait_started
+            if wait_elapsed > 1.0:
+                logger.info(
+                    "LLM inference acquired lock after %.1fs", wait_elapsed,
+                )
+            try:
+                return await asyncio.wait_for(
+                    self.openai_client.responses.create(**kwargs),
+                    timeout=INFERENCE_HARD_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError as exc:
+                logger.warning(
+                    "LLM inference exceeded %.0fs wall-clock cap — aborting",
+                    INFERENCE_HARD_TIMEOUT_SECONDS,
+                )
+                raise openai.APITimeoutError(
+                    request=httpx.Request("POST", self.config.api_url),
+                ) from exc

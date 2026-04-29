@@ -7,10 +7,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 
+import openai
+
 from app.bitbucket import BitbucketClient
 from app.db import repository
 from app.feedback import classify_feedback, disagree_response
 from app.llm_client import (
+    INFERENCE_HARD_TIMEOUT_SECONDS,
     LLMClient,
     FileReviewData,
     count_tokens,
@@ -47,6 +50,59 @@ def _epoch_ms_to_datetime(epoch_ms: int | None) -> datetime | None:
     return datetime.fromtimestamp(epoch_ms / 1000, tz=timezone.utc)
 
 SEVERITY_ORDER = {"issue": 0, "suggestion": 1}
+
+# Sentinel marker for the staleness banner we prepend to an existing summary
+# comment when a re-review times out. Re-runs detect this and replace the
+# previous banner instead of stacking new ones.
+_STALE_BANNER_SENTINEL = "<!-- noergler-stale-banner -->"
+
+# Visible prefix of the banner. Used as a defensive fallback in case
+# Bitbucket's markdown renderer strips the HTML comment sentinel before
+# returning the comment body — without this fallback, banners would stack on
+# repeated timeouts. The phrase is stable across the two banner variants
+# (with/without prior commit sha).
+_STALE_BANNER_VISIBLE_PREFIX = "⚠️ No response from the model within"
+
+
+def _strip_stale_banner(body: str) -> str:
+    """If `body` starts with our staleness banner block, return the body
+    without it. Idempotent — safe to call on bodies that don't have one.
+
+    Banner format we write:
+        <!-- noergler-stale-banner -->
+        ⚠️ No response from the model within ...one-line message...
+        <blank line>
+        <original body>
+
+    Detection priority: sentinel first; if that's missing (Bitbucket may
+    strip HTML comments through its renderer), fall back to the visible
+    "⚠️ No response from the model within" prefix on the first content line.
+    Strips everything up to and including the first blank line that follows.
+    """
+    has_sentinel = body.startswith(_STALE_BANNER_SENTINEL)
+    if not has_sentinel:
+        # Skip leading blank lines, then check the first non-blank.
+        lines_iter = iter(body.splitlines())
+        first_content = ""
+        for line in lines_iter:
+            if line.strip():
+                first_content = line
+                break
+        if not first_content.startswith(_STALE_BANNER_VISIBLE_PREFIX):
+            return body
+
+    lines = body.splitlines()
+    # Find the first non-blank line (the visible banner row, possibly
+    # preceded by the sentinel).
+    i = 0
+    if has_sentinel:
+        i = 1
+    # Skip the visible banner line itself, then skip until first blank line.
+    while i < len(lines) and lines[i].strip() != "":
+        i += 1
+    while i < len(lines) and lines[i].strip() == "":
+        i += 1
+    return "\n".join(lines[i:])
 
 CLEAN_REVIEW_MESSAGES = (
     "No issues found ✅",
@@ -526,6 +582,47 @@ class Reviewer:
                 previously_posted_findings=findings_for_prompt,
             )
 
+            # Deadline-exceeded: never post a normal summary. The model didn't
+            # respond within our wall-clock cap; partial findings (if any) are
+            # discarded. We post a "Review skipped" notice or prepend a
+            # staleness banner to the existing summary so the human reader
+            # knows the latest commit was not reviewed. Stats are skipped to
+            # avoid polluting metrics with a 0/0 row.
+            if llm_result.timed_out:
+                short_new = (source_commit or "")[:8] or "unknown"
+                logger.error(
+                    "Review of %s aborted — no response within %.0fs (commit %s)",
+                    pr_tag, INFERENCE_HARD_TIMEOUT_SECONDS, short_new,
+                )
+                # Read the prior successful commit BEFORE the upsert (which
+                # would otherwise overwrite it with this failed commit).
+                prior_commit = await _safe_db(
+                    repository.get_last_reviewed_commit(
+                        self.db_pool, project_key, repo_slug, pr_id,
+                    ),
+                    fallback=None,
+                )
+                # Preserve the prior commit — the timed-out run did not
+                # actually review the new one, so advancing the pointer would
+                # cause the next incremental review to skip the un-reviewed
+                # range.
+                pr_review_id = await _safe_db(
+                    repository.upsert_pr_review(
+                        self.db_pool, project_key, repo_slug, pr_id,
+                        last_reviewed_commit=prior_commit,
+                        author=author_name,
+                        pr_title=pr.title,
+                        opened_at=opened_at,
+                    ),
+                    fallback=None,
+                )
+                await self._post_or_update_timeout_notice(
+                    project_key, repo_slug, pr_id, pr_review_id,
+                    new_commit=source_commit,
+                    prior_commit=prior_commit,
+                )
+                return
+
             # Deduplicate against existing findings in DB
             original_count = len(llm_result.findings)
             existing_keys = {
@@ -743,6 +840,24 @@ class Reviewer:
                 project_key, repo_slug, pr.id, comment.id, answer,
             )
             logger.info("Posted Q&A reply on %s", pr_tag)
+        except openai.APITimeoutError:
+            timeout_minutes = int(INFERENCE_HARD_TIMEOUT_SECONDS / 60)
+            logger.error(
+                "Mention Q&A on %s aborted — no response within %.0fs",
+                pr_tag, INFERENCE_HARD_TIMEOUT_SECONDS,
+            )
+            try:
+                await self.bitbucket.reply_to_comment(
+                    project_key, repo_slug, pr.id, comment.id,
+                    f"⚠️ No response from the model within {timeout_minutes} "
+                    f"minutes. Please try again, or simplify the question if "
+                    f"it requires a lot of context.",
+                )
+            except Exception:
+                logger.error(
+                    "Failed to post mention timeout reply on %s", pr_tag,
+                    exc_info=True,
+                )
         except Exception:
             logger.error("Mention Q&A on %s failed", pr_tag, exc_info=True)
 
@@ -1008,6 +1123,116 @@ class Reviewer:
                 )
         except Exception:
             logger.error("Failed to post summary comment", exc_info=True)
+
+    async def _post_or_update_timeout_notice(
+        self,
+        project_key: str,
+        repo_slug: str,
+        pr_id: int,
+        pr_review_id: int | None,
+        new_commit: str | None,
+        prior_commit: str | None,
+    ) -> None:
+        """Post a deadline-exceeded notice or prepend a staleness banner.
+
+        - **No prior summary tracked** → post a fresh "Review skipped"
+          comment that becomes the noergler comment for this PR. The next
+          successful review will update it in place via
+          `_post_or_update_summary`.
+        - **Prior summary tracked** → fetch its body, strip any previous
+          staleness banner (idempotency on repeated timeouts), prepend a
+          fresh banner naming the failed and prior commits.
+
+        We always preserve the original body. The next successful review
+        replaces the entire comment, banner and all.
+        """
+        timeout_minutes = int(INFERENCE_HARD_TIMEOUT_SECONDS / 60)
+        short_new = (new_commit or "")[:8] or "unknown"
+
+        existing_summary = None
+        if pr_review_id:
+            existing_summary = await _safe_db(
+                repository.get_summary_comment_info(self.db_pool, pr_review_id),
+                fallback=None,
+            )
+
+        if not existing_summary:
+            body = (
+                f"⚠️ **Review skipped** — no response from the model within "
+                f"{timeout_minutes} minutes for commit `{short_new}`. "
+                f"The review did not complete. Push a new commit or "
+                f"`@{self.bitbucket.bot_username}` to retry."
+            )
+            try:
+                post_result = await self.bitbucket.post_pr_comment(
+                    project_key, repo_slug, pr_id, body,
+                )
+            except Exception:
+                logger.error("Failed to post timeout notice", exc_info=True)
+                return
+            if post_result and pr_review_id:
+                comment_id, version = post_result
+                await _safe_db(
+                    repository.update_summary_comment(
+                        self.db_pool, pr_review_id,
+                        comment_id, version or 0,
+                    )
+                )
+            return
+
+        comment_id = existing_summary["summary_comment_id"]
+        version = existing_summary["summary_comment_version"]
+        try:
+            existing_payload = await self.bitbucket.fetch_pr_comment(
+                project_key, repo_slug, pr_id, comment_id,
+            )
+        except Exception:
+            logger.error(
+                "Failed to fetch existing summary for staleness banner",
+                exc_info=True,
+            )
+            return
+        existing_body = existing_payload.get("text", "") or ""
+        # Bitbucket's optimistic locking: prefer the live version over the
+        # one cached in our DB to avoid a 409.
+        live_version = existing_payload.get("version", version)
+
+        body_without_banner = _strip_stale_banner(existing_body)
+        short_old = (prior_commit or "")[:8] if prior_commit else None
+        if short_old:
+            banner = (
+                f"{_STALE_BANNER_SENTINEL}\n"
+                f"⚠️ No response from the model within {timeout_minutes} "
+                f"minutes on commit `{short_new}` — findings below reflect "
+                f"the earlier commit `{short_old}`."
+            )
+        else:
+            banner = (
+                f"{_STALE_BANNER_SENTINEL}\n"
+                f"⚠️ No response from the model within {timeout_minutes} "
+                f"minutes on commit `{short_new}` — findings below reflect "
+                f"an earlier commit."
+            )
+        new_body = banner + "\n\n" + body_without_banner
+
+        try:
+            new_version = await self.bitbucket.update_pr_comment(
+                project_key, repo_slug, pr_id,
+                comment_id, live_version, new_body,
+            )
+        except Exception:
+            logger.error(
+                "Failed to update existing summary with staleness banner",
+                exc_info=True,
+            )
+            return
+        if new_version is not None and pr_review_id:
+            await _safe_db(
+                repository.update_summary_comment(
+                    self.db_pool, pr_review_id,
+                    comment_id, new_version,
+                )
+            )
 
     async def _fetch_repo_instructions(
         self, project: str, repo: str, pr: PullRequest

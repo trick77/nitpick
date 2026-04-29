@@ -1014,7 +1014,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped, _compliance, _summary = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance, _summary, _to = await client._review_file_group(files, template, depth=0)
             assert len(findings) == 2
             assert {f.file for f in findings} == {"a.py", "d.py"}
             assert skipped == []
@@ -1040,7 +1040,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped, _compliance, _summary = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance, _summary, _to = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert skipped == []
             assert call_count == 2
@@ -1060,7 +1060,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped, _compliance, _summary = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance, _summary, _to = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert pt == 0
             assert ct == 0
@@ -1081,7 +1081,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped, _compliance, _summary = await client._review_file_group(files, template, depth=0)
+            findings, pt, ct, skipped, _compliance, _summary, _to = await client._review_file_group(files, template, depth=0)
             assert findings == []
             assert skipped == ["huge.py"]
         finally:
@@ -1103,7 +1103,7 @@ class TestReviewFileGroup413Retry:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            findings, pt, ct, skipped, _compliance, _summary = await client._review_file_group(files, template, depth=3)
+            findings, pt, ct, skipped, _compliance, _summary, _to = await client._review_file_group(files, template, depth=3)
             assert findings == []
             assert set(skipped) == {"a.py", "b.py"}
         finally:
@@ -1237,7 +1237,7 @@ class TestParse413TokenLimit:
         client._call_api = mock_call_api
         try:
             template = client.prompt_template
-            _, _, _, skipped, _, _ = await client._review_file_group(files, template, depth=0)
+            _, _, _, skipped, _, _, _ = await client._review_file_group(files, template, depth=0)
             assert skipped == ["big.py"]
             assert client.max_tokens_per_chunk == 4000
         finally:
@@ -1279,5 +1279,179 @@ class TestParse413TokenLimit:
             _, _, _, skipped = await client._answer_file_group(files, template, depth=0)
             assert skipped == ["big.py"]
             assert client.max_tokens_per_chunk == 5000
+        finally:
+            await client.close()
+
+
+class TestSerializationAndDeadline:
+    @pytest.mark.asyncio
+    async def test_concurrent_chats_are_serialized(self, llm_config, review_config, token_provider):
+        """Two concurrent _chat calls must not overlap inside _execute_responses_create."""
+        import asyncio
+        client = LLMClient(llm_config, review_config, token_provider)
+
+        active = 0
+        max_active = 0
+
+        async def fake_create(**_kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                await asyncio.sleep(0.05)
+                return _mock_completion("ok")
+            finally:
+                active -= 1
+
+        client.openai_client.responses.create = fake_create
+        try:
+            await asyncio.gather(
+                client._chat("sys", "u1"),
+                client._chat("sys", "u2"),
+                client._chat("sys", "u3"),
+            )
+            assert max_active == 1, f"expected serialized calls, observed {max_active} concurrent"
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_review_and_mention_paths_share_the_lock(
+        self, llm_config, review_config, token_provider,
+    ):
+        """answer_question (mention path) and review_diff (review path) both
+        funnel through _execute_responses_create. Concurrent calls from the
+        two entry points must serialize on the same lock."""
+        import asyncio
+        client = LLMClient(llm_config, review_config, token_provider)
+
+        active = 0
+        max_active = 0
+
+        async def fake_create(**_kwargs):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            try:
+                await asyncio.sleep(0.05)
+                # Empty findings JSON: parses cleanly for the review path,
+                # and answer_question doesn't validate JSON shape itself.
+                return _mock_completion('{"findings": [], "compliance_requirements": [], "change_summary": ["x"]}')
+            finally:
+                active -= 1
+
+        client.openai_client.responses.create = fake_create
+        files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+        try:
+            await asyncio.gather(
+                client.review_diff(files),
+                client.answer_question("what?", files),
+                client.review_diff(files),
+            )
+            assert max_active == 1, (
+                f"review and mention paths must serialize via _execute_responses_create, "
+                f"but observed {max_active} concurrent calls"
+            )
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_hard_timeout_translates_to_apitimeout(self, llm_config, review_config, token_provider, monkeypatch):
+        """When the wall-clock cap fires, _chat raises openai.APITimeoutError."""
+        import asyncio
+        import app.llm_client as llm_module
+        monkeypatch.setattr(llm_module, "INFERENCE_HARD_TIMEOUT_SECONDS", 0.05)
+
+        client = LLMClient(llm_config, review_config, token_provider)
+
+        async def slow_create(**_kwargs):
+            await asyncio.sleep(5)
+            return _mock_completion("never")
+
+        client.openai_client.responses.create = slow_create
+        try:
+            with pytest.raises(openai.APITimeoutError):
+                await client._chat("sys", "u")
+        finally:
+            await client.close()
+
+    def test_async_openai_constructed_with_no_retries(self, llm_config, review_config, token_provider):
+        """Silent SDK retries are disabled — one attempt only."""
+        client = LLMClient(llm_config, review_config, token_provider)
+        try:
+            assert client.openai_client.max_retries == 0
+        finally:
+            import asyncio
+            asyncio.run(client.close())
+
+
+class TestReviewResultTimedOut:
+    @pytest.mark.asyncio
+    async def test_timed_out_chunk_sets_flag(self, llm_config, review_config, token_provider):
+        client = LLMClient(llm_config, review_config, token_provider)
+
+        async def raise_timeout(prompt: str):
+            raise openai.APITimeoutError(request=httpx.Request("POST", "https://x"))
+
+        client._call_api = raise_timeout
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            result = await client.review_diff(files)
+            assert result.timed_out is True
+            assert result.findings == []
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_bisection_merge_propagates_timed_out(self, llm_config, review_config, token_provider):
+        """When one half of a 413-bisected group times out, the merged result
+        carries timed_out=True even if the other half succeeded."""
+        from app.models import ReviewFinding
+        client = LLMClient(llm_config, review_config, token_provider)
+
+        files = [
+            FileReviewData(path="a.py", diff="+a\n", content="a\n"),
+            FileReviewData(path="b.py", diff="+b\n", content="b\n"),
+        ]
+        call_count = 0
+
+        async def mock_call_api(prompt: str):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise _make_api_status_error(413, "too large")
+            if "a.py" in prompt:
+                raise openai.APITimeoutError(request=httpx.Request("POST", "https://x"))
+            return (
+                [ReviewFinding(file="b.py", line=1, severity="suggestion", comment="ok")],
+                10, 5, [], [],
+            )
+
+        client._call_api = mock_call_api
+        try:
+            template = client.prompt_template
+            findings, pt, ct, skipped, _compliance, _summary, timed_out = (
+                await client._review_file_group(files, template, depth=0)
+            )
+            assert timed_out is True
+            assert any(f.file == "b.py" for f in findings)
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_no_timeout_leaves_flag_false(self, llm_config, review_config, token_provider):
+        from app.models import ReviewFinding
+        client = LLMClient(llm_config, review_config, token_provider)
+
+        async def ok(prompt: str):
+            return (
+                [ReviewFinding(file="a.py", line=1, severity="suggestion", comment="ok")],
+                10, 5, [], [],
+            )
+
+        client._call_api = ok
+        try:
+            files = [FileReviewData(path="a.py", diff="+x\n", content="x\n")]
+            result = await client.review_diff(files)
+            assert result.timed_out is False
         finally:
             await client.close()
